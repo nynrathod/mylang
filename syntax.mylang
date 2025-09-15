@@ -1,0 +1,87 @@
+
+// PascalCase import
+import crypto                  # full module
+import crypto::{sha256, sha512}  # selective import
+import crypto::{sha256, sha512} as c  # aliasing optional
+
+
+struct UserProfile {
+    name: String
+    age: Int
+}
+
+struct AdminRole {
+    level: Int
+}
+
+
+enum UserRole {
+    Admin(AdminRole)
+    Guest
+    Moderator
+}
+
+
+
+func main() {
+	
+	use cors(*)
+
+	// variables
+	let a = 5
+	var b = "hello"
+
+	let isAdmin: bool = true
+	let age: int = 42
+
+
+	# Constant (UPPER_SNAKE_CASE), immutable
+	MAX_USERS: Int = 100
+
+	# Array
+	let nums : Array<Int> = [1, 2, 3, 4]
+
+	# Map
+	user : Map<String, String> = {"name": "Alice", "role": "admin"}
+
+	// Explicit type
+	let userName: String = "Nayan"
+	let userData: Array<String> = ["Nayan", "Rathod"]
+
+
+	// fuction call
+	data, info = GetUser()
+	_, info = GetUser()
+
+	for i in 0..n {
+	}
+
+	// statement
+	print("5")
+
+	if x > 10 {
+	    print(">10")
+	} else if x == 10 {
+	    print("=10")
+	} else {
+	    print("<10")
+	}
+
+}
+
+
+@Get('/user')
+func GetUser() {
+	return user, userInfo
+}
+
+
+
+// # Private Function (PascalCase)
+func GetUser() { }
+
+// # Private Function (camelCase)
+func getUser() { }
+
+// function with return type
+func getUser() Map<String,String> { }
