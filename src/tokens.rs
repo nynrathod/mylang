@@ -6,25 +6,37 @@ pub enum TokenType {
     Import,
     Struct,
     Enum,
-    // Array,
+
     Map,
+    If,
+    Else,
+    For,
+    Return,
+    Break,
+    Continue,
 
     // Literals
-    Identifier,
     Number,
     String,
     Boolean,
 
+    // Identifiers
+    Identifier,
+
     // Operators
-    Eq,           // `=`
-    Plus,         // `+`,
-    Minus,        // `-`
-    Star,         // `*`
-    Slash,        // `/`
-    Percent,      // `%`
-    Bang,         // `!`
-    Lt,           // `<`
-    Gt,           // `>`
+    Eq,      // `=`
+    Plus,    // `+`,
+    Minus,   // `-`
+    Star,    // `*`
+    Slash,   // `/`
+    Percent, // `%`
+    Bang,    // `!`
+    Lt,      // `<`
+    Gt,      // `>`
+    And,     // `&`
+    Or,      // `|`,
+
+    // Delimiters
     OpenParen,    // `(`
     CloseParen,   // `)`
     OpenBrace,    // `{`
@@ -40,9 +52,8 @@ pub enum TokenType {
     Tilde,        // `~`
     Question,     // `?`
     Dollar,       // `$`
-    And,          // `&`
-    Or,           // `|`,
-    Underscore,   // `_`
+
+    Underscore, // `_`
 }
 
 #[derive(Debug, Clone)]
