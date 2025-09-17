@@ -6,8 +6,8 @@ import crypto::{sha256, sha512} as c  # aliasing optional
 
 
 struct UserProfile {
-    name: String
-    age: Int
+    name: String,
+    age: Int,
 }
 
 struct AdminRole {
@@ -16,37 +16,37 @@ struct AdminRole {
 
 
 enum UserRole {
-    Admin(AdminRole)
-    Guest
+    Admin(AdminRole),
+    Guest,
     Moderator
 }
 
 
 
-func main() {
+fn main() {
 
-	use cors(*)
+	use cors(*);
 
 	// variables
-	let a = 5
-	var b = "hello"
+	let a = 5;
+	var b = "hello";
 
-	let isAdmin: bool = true
-	let age: Int = 42
+	let isAdmin: bool = true;
+	let age: Int = 42;
 
 
-	# Constant (UPPER_SNAKE_CASE), immutable
-	MAX_USERS: Int = 100
+	// # Constant (UPPER_SNAKE_CASE), immutable
+	// const MAX_USERS: Int = 100;
 
-	# Array
-	let nums: Array<Int> = [1, 2, 3, 4]
+	// # Array
+	let nums: Array<Int> = [1, 2, 3, 4];
 
-	# Map
-	user: Map<String, String> = {"name": "Alice", "role": "admin"}
+	// # Map
+	let	user: Map<String, String> = {"name": "Alice", "role", "admin"};
 
 	// Explicit type
-	let userName: String = "Nayan"
-	let userData: Array<String> = ["Nayan", "Rathod"]
+	let userName: String = "Nayan";
+	let userData: Array<String> = ["Nayan", "Rathod"];
 
 
 	// fuction call
@@ -71,17 +71,17 @@ func main() {
 
 
 @Get('/user')
-func GetUser() {
+fn GetUser() {
 	return user, userInfo
 }
 
 
 
 // # Private Function (PascalCase)
-func GetUser() { }
+fn GetUser() { }
 
 // # Private Function (camelCase)
-func getUser() { }
+fn getUser() { }
 
 // function with return type
-func getUser() Map<String,String> { }
+fn getUser() Map<String,String> { }
