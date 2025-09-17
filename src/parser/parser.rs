@@ -49,7 +49,7 @@ impl<'a> Parser<'a> {
                 TokenType::Struct => self.parse_struct_decl(),
                 TokenType::Enum => self.parse_enum_decl(),
                 TokenType::If => self.parse_conditional_decl(),
-
+                TokenType::Function => self.parse_functional_decl(),
                 _ => Err(ParseError::UnexpectedToken(format!(
                     "Unexpected token: {:?}",
                     tok.kind

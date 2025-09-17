@@ -53,4 +53,11 @@ pub enum AstNode {
         else_branch: Option<Box<AstNode>>,
     },
     Block(Vec<AstNode>),
+
+    FunctionDecl {
+        name: String,
+        params: Vec<(String, Option<TypeNode>)>,
+        return_type: Option<TypeNode>,
+        body: Vec<AstNode>,
+    },
 }

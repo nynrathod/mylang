@@ -3,6 +3,73 @@ use crate::parser::ast::AstNode;
 use crate::parser::{ParseError, ParseResult, Parser};
 
 impl<'a> Parser<'a> {
+    pub fn parse_functional_decl(&mut self) -> ParseResult<AstNode> {
+        self.expect(TokenType::Function)?; // consume 'fn'
+
+        // function name
+        let name_tok = self.expect(TokenType::Identifier)?;
+        let func_name = name_tok.value.to_string();
+
+        self.expect(TokenType::OpenParen)?; // consume '('
+
+        let mut params = Vec::new();
+
+        while let Some(tok) = self.peek() {
+            if tok.kind == TokenType::CloseParen {
+                break; // done with parameters
+            }
+
+            // parse parameter name
+            let param_name_tok = self.expect(TokenType::Identifier)?;
+            let param_name = param_name_tok.value.to_string();
+
+            // optional type
+            let mut param_type = None;
+            if let Some(tok) = self.peek() {
+                if tok.kind == TokenType::Colon {
+                    self.advance(); // consume ':'
+                    param_type = Some(self.parse_type_annotation()?);
+                }
+            }
+
+            params.push((param_name, param_type));
+
+            // consume comma if present
+            if let Some(tok) = self.peek() {
+                if tok.kind == TokenType::Comma {
+                    self.advance(); // consume ',' and continue
+                } else if tok.kind != TokenType::CloseParen {
+                    return Err(ParseError::UnexpectedToken(format!(
+                        "Expected ',' or ')', got {:?}",
+                        tok.kind
+                    )));
+                }
+            }
+        }
+
+        self.expect(TokenType::CloseParen)?; // consume ')'
+
+        // optional return type
+        let mut return_type = None;
+        if let Some(tok) = self.peek() {
+            if tok.kind == TokenType::Arrow {
+                // e.g., '->'
+                self.advance();
+                return_type = Some(self.parse_type_annotation()?); // or parse multiple types if you want
+            }
+        }
+
+        self.expect(TokenType::OpenBrace)?; // consume '{'
+        let body_block = self.parse_block()?; // parse function body
+
+        Ok(AstNode::FunctionDecl {
+            name: func_name,
+            params,
+            return_type,
+            body: body_block,
+        })
+    }
+
     pub fn parse_conditional_decl(&mut self) -> ParseResult<AstNode> {
         self.expect(TokenType::If)?; // consume 'if'
 
