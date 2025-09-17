@@ -6,6 +6,7 @@ pub fn lex(input: &str) -> Vec<Token> {
 
     // Keyword map
     let mut keywords: HashMap<&str, TokenType> = HashMap::new();
+    keywords.insert("var", TokenType::Var);
     keywords.insert("let", TokenType::Let);
     keywords.insert("fn", TokenType::Function);
     keywords.insert("import", TokenType::Import);

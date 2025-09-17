@@ -1,7 +1,8 @@
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TokenType {
     // Keywords
-    Let,
+    Let, // immutable
+    Var, // mutable
     Function,
     Import,
     Struct,
