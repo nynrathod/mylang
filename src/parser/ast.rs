@@ -32,4 +32,20 @@ pub enum AstNode {
         name: String,
         value: Box<AstNode>,
     },
+
+    StructDecl {
+        name: String,
+        fields: Vec<(String, TypeNode)>,
+    },
+
+    EnumDecl {
+        name: String,
+        variants: Vec<(String, Option<TypeNode>)>,
+    },
+
+    ConditionalDecl {
+        condition: Box<AstNode>,
+        then_branch: Box<AstNode>,
+        else_branch: Option<Box<AstNode>>,
+    },
 }
