@@ -1,5 +1,6 @@
-use crate::tokens::{Token, TokenType};
+use crate::lexar::token::{Token, TokenType};
 use std::collections::HashMap;
+
 pub fn lex(input: &str) -> Vec<Token> {
     let chars: Vec<char> = input.chars().collect();
     let mut tokens: Vec<Token> = Vec::new();
