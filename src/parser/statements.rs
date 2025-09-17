@@ -3,6 +3,55 @@ use crate::parser::ast::AstNode;
 use crate::parser::{ParseError, ParseResult, Parser};
 
 impl<'a> Parser<'a> {
+    pub fn parse_conditional_decl(&mut self) -> ParseResult<AstNode> {
+        self.expect(TokenType::If)?; // consume 'if'
+
+        // condition expression
+        let condition = self.parse_expression()?;
+
+        // then block
+        self.expect(TokenType::OpenBrace)?;
+        let then_block = self.parse_block()?; // parse statements until '}'
+
+        // optional else / else if
+        let mut else_branch = None;
+        if let Some(tok) = self.peek() {
+            if tok.kind == TokenType::Else {
+                self.advance(); // consume 'else'
+
+                if let Some(next) = self.peek() {
+                    if next.kind == TokenType::If {
+                        // else if -> recursive call
+                        let elseif = self.parse_conditional_decl()?;
+                        else_branch = Some(Box::new(elseif));
+                    } else {
+                        // else { ... }
+                        self.expect(TokenType::OpenBrace)?;
+                        let else_block = self.parse_block()?;
+                        else_branch = Some(Box::new(AstNode::Block(else_block)));
+                    }
+                }
+            }
+        }
+
+        Ok(AstNode::ConditionalDecl {
+            condition: Box::new(condition),
+            then_block,
+            else_branch,
+        })
+    }
+
+    fn parse_block(&mut self) -> ParseResult<Vec<AstNode>> {
+        let mut stmts = Vec::new();
+        while let Some(tok) = self.peek() {
+            if tok.kind == TokenType::CloseBrace {
+                break;
+            }
+            stmts.push(self.parse_statement()?);
+        }
+        self.expect(TokenType::CloseBrace)?; // consume '}'
+        Ok(stmts)
+    }
     pub fn parse_enum_decl(&mut self) -> ParseResult<AstNode> {
         self.expect(TokenType::Enum)?; // consume 'enum'
 

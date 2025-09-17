@@ -38,6 +38,22 @@ pub fn lex(input: &str) -> Vec<Token> {
     operators.insert("&", TokenType::And);
     operators.insert("|", TokenType::Or);
 
+    operators.insert("==", TokenType::EqEq);
+    operators.insert("===", TokenType::EqEqEq);
+    operators.insert("!=", TokenType::NotEq);
+    operators.insert("!==", TokenType::NotEqEq);
+    operators.insert(">=", TokenType::GtEq);
+    operators.insert("<=", TokenType::LtEq);
+    operators.insert("&&", TokenType::AndAnd);
+    operators.insert("||", TokenType::OrOr);
+    operators.insert("+=", TokenType::PlusEq);
+    operators.insert("-=", TokenType::MinusEq);
+    operators.insert("*=", TokenType::StarEq);
+    operators.insert("/=", TokenType::SlashEq);
+    operators.insert("%=", TokenType::PercentEq);
+    operators.insert("->", TokenType::Arrow);
+    operators.insert("=>", TokenType::FatArrow);
+
     operators.insert("(", TokenType::OpenParen);
     operators.insert(")", TokenType::CloseParen);
     operators.insert("{", TokenType::OpenBrace);

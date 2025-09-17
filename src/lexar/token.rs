@@ -25,17 +25,33 @@ pub enum TokenType {
     Identifier,
 
     // Operators
-    Eq,      // `=`
     Plus,    // `+`,
     Minus,   // `-`
     Star,    // `*`
     Slash,   // `/`
     Percent, // `%`
-    Bang,    // `!`
-    Lt,      // `<`
-    Gt,      // `>`
-    And,     // `&`
-    Or,      // `|`,
+
+    Bang,      // `!`
+    Lt,        // `<`
+    Gt,        // `>`
+    And,       // `&`
+    Or,        // `|`,
+    Eq,        // `=`
+    EqEq,      // `==`
+    EqEqEq,    // `===`
+    NotEq,     // `!=`
+    NotEqEq,   // `!==`
+    GtEq,      // `>=`
+    LtEq,      // `<=`
+    AndAnd,    // `&&`
+    OrOr,      // `||`
+    PlusEq,    // `+=`
+    MinusEq,   // `-=`
+    StarEq,    // `*=`
+    SlashEq,   // `/=`
+    PercentEq, // `%=`
+    Arrow,     // `->`
+    FatArrow,  // `=>`
 
     // Delimiters
     OpenParen,    // `(`

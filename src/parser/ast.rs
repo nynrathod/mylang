@@ -18,6 +18,10 @@ pub enum AstNode {
     BoolLiteral(bool),
     ArrayLiteral(Vec<AstNode>),
     MapLiteral(Vec<(AstNode, AstNode)>),
+    UnaryExpr {
+        op: TokenType,
+        expr: Box<AstNode>,
+    },
 
     // 1+2 || a+2
     BinaryExpr {
@@ -45,7 +49,8 @@ pub enum AstNode {
 
     ConditionalDecl {
         condition: Box<AstNode>,
-        then_branch: Box<AstNode>,
+        then_block: Vec<AstNode>,
         else_branch: Option<Box<AstNode>>,
     },
+    Block(Vec<AstNode>),
 }

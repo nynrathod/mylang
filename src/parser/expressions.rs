@@ -4,7 +4,22 @@ use crate::parser::{ParseError, ParseResult, Parser};
 
 impl<'a> Parser<'a> {
     pub fn parse_expression(&mut self) -> ParseResult<AstNode> {
-        let left = match self.peek() {
+        if let Some(tok) = self.peek() {
+            match tok.kind {
+                TokenType::Bang | TokenType::Minus | TokenType::Plus => {
+                    let op = tok.kind;
+                    self.advance(); // consume operator
+                    let expr = self.parse_expression()?; // recurse into right-hand side
+                    return Ok(AstNode::UnaryExpr {
+                        op,
+                        expr: Box::new(expr),
+                    });
+                }
+                _ => {}
+            }
+        }
+
+        let mut left = match self.peek() {
             Some(tok) => match tok.kind {
                 TokenType::Number => {
                     let tok = self.advance().unwrap();
@@ -40,15 +55,43 @@ impl<'a> Parser<'a> {
         };
 
         // Handle binary '+' operator (you can extend later)
-        if let Some(op_tok) = self.peek() {
-            if op_tok.kind == TokenType::Plus {
-                self.advance();
-                let right = self.parse_expression()?;
-                return Ok(AstNode::BinaryExpr {
-                    left: Box::new(left),
-                    op: TokenType::Plus,
-                    right: Box::new(right),
-                });
+        while let Some(tok) = self.peek() {
+            let op_kind = tok.kind; // copy the TokenType
+            match op_kind {
+                TokenType::Gt
+                | TokenType::Lt
+                | TokenType::Eq
+                | TokenType::EqEq
+                | TokenType::EqEqEq
+                | TokenType::NotEq
+                | TokenType::NotEqEq
+                | TokenType::GtEq
+                | TokenType::LtEq
+                | TokenType::And
+                | TokenType::AndAnd
+                | TokenType::Or
+                | TokenType::OrOr
+                | TokenType::Plus
+                | TokenType::Minus
+                | TokenType::Star
+                | TokenType::Slash
+                | TokenType::Percent
+                | TokenType::PlusEq
+                | TokenType::MinusEq
+                | TokenType::StarEq
+                | TokenType::SlashEq
+                | TokenType::PercentEq
+                | TokenType::Arrow
+                | TokenType::FatArrow => {
+                    self.advance(); // now mutable borrow is fine
+                    let right = self.parse_expression()?;
+                    left = AstNode::BinaryExpr {
+                        left: Box::new(left),
+                        op: op_kind, // use the copied kind
+                        right: Box::new(right),
+                    };
+                }
+                _ => break,
             }
         }
 

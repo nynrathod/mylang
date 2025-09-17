@@ -48,6 +48,8 @@ impl<'a> Parser<'a> {
                 TokenType::Let | TokenType::Var => self.parse_var_decl(),
                 TokenType::Struct => self.parse_struct_decl(),
                 TokenType::Enum => self.parse_enum_decl(),
+                TokenType::If => self.parse_conditional_decl(),
+
                 _ => Err(ParseError::UnexpectedToken(format!(
                     "Unexpected token: {:?}",
                     tok.kind
