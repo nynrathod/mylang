@@ -90,9 +90,16 @@ fn main() {
         fn GetUser(a: Int) -> Int {}
         fn GetUser(a: String, b: String) -> String {}
         fn GetUser(a: Array<String>) -> Array<String> {}
-        fn GetUser(a: Map<String, String>) -> Map<String, String> {}
+
         fn GetUser(a: Int, b: Int, c: Int) -> Int {}
         fn GetUser(a: Int, b: Int, c: Int) {}
+        fn getUser(a: Map<String, String>) -> Map<String, String> {
+            if a > b {
+
+            } else if b < c {
+               	let nums: Array<Int> = [1, 2, 3, 4];
+                }
+        }
     "#;
 
     // let input = fs::read_to_string("./syntax.mylang").unwrap();

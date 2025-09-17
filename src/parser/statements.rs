@@ -10,6 +10,12 @@ impl<'a> Parser<'a> {
         let name_tok = self.expect(TokenType::Identifier)?;
         let func_name = name_tok.value.to_string();
 
+        let visibility = if func_name.chars().next().unwrap_or('a').is_uppercase() {
+            "Public".to_string()
+        } else {
+            "Private".to_string()
+        };
+
         self.expect(TokenType::OpenParen)?; // consume '('
 
         let mut params = Vec::new();
@@ -64,6 +70,7 @@ impl<'a> Parser<'a> {
 
         Ok(AstNode::FunctionDecl {
             name: func_name,
+            visibility,
             params,
             return_type,
             body: body_block,

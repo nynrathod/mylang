@@ -56,6 +56,7 @@ pub enum AstNode {
 
     FunctionDecl {
         name: String,
+        visibility: String,
         params: Vec<(String, Option<TypeNode>)>,
         return_type: Option<TypeNode>,
         body: Vec<AstNode>,

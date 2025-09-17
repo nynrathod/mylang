@@ -71,7 +71,7 @@ fn main() {
 
 
 @Get('/user')
-fn GetUser() {
+fn GetUser() -> String, String {
 	return user, userInfo
 }
 
