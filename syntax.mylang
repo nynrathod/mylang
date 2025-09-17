@@ -24,7 +24,7 @@ enum UserRole {
 
 
 func main() {
-	
+
 	use cors(*)
 
 	// variables
@@ -32,17 +32,17 @@ func main() {
 	var b = "hello"
 
 	let isAdmin: bool = true
-	let age: int = 42
+	let age: Int = 42
 
 
 	# Constant (UPPER_SNAKE_CASE), immutable
 	MAX_USERS: Int = 100
 
 	# Array
-	let nums : Array<Int> = [1, 2, 3, 4]
+	let nums: Array<Int> = [1, 2, 3, 4]
 
 	# Map
-	user : Map<String, String> = {"name": "Alice", "role": "admin"}
+	user: Map<String, String> = {"name": "Alice", "role": "admin"}
 
 	// Explicit type
 	let userName: String = "Nayan"
