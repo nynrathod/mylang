@@ -2,7 +2,7 @@
 
 use crate::lexar::token::TokenType;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TypeNode {
     Int,
     String,
