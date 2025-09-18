@@ -1,4 +1,6 @@
-use crate::lexar::token::{Token, TokenType};
+#![allow(dead_code)]
+
+use crate::lexar::token::TokenType;
 
 #[derive(Debug, Clone)]
 pub enum TypeNode {

@@ -35,9 +35,7 @@ impl<'a> Parser<'a> {
                         let mut args = Vec::new();
                         while !self.peek_is(TokenType::CloseParen) {
                             args.push(self.parse_expression()?); // recursive parse
-                            if self.peek_is(TokenType::Comma) {
-                                self.advance(); // consume ','
-                            } else {
+                            if !self.consume_if(TokenType::Comma) {
                                 break;
                             }
                         }
@@ -76,11 +74,56 @@ impl<'a> Parser<'a> {
             None => return Err(ParseError::EndOfInput),
         };
 
-        // Handle binary '+' operator (you can extend later)
+        // Inside parse_expression
         while let Some(tok) = self.peek() {
-            let op_kind = tok.kind; // copy the TokenType
-            match op_kind {
-                TokenType::Gt
+            if !Self::is_binary_op(tok.kind) {
+                // <-- use Self::
+                break;
+            }
+            let op = tok.kind;
+            self.advance();
+            let right = self.parse_expression()?;
+            left = AstNode::BinaryExpr {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
+            };
+        }
+
+        Ok(left)
+    }
+
+    fn parse_array_literal(&mut self) -> ParseResult<AstNode> {
+        self.expect(TokenType::OpenBracket)?;
+
+        let elements = self
+            .parse_comma_separated(|parser| parser.parse_expression(), TokenType::CloseBracket)?;
+
+        self.expect(TokenType::CloseBracket)?;
+        Ok(AstNode::ArrayLiteral(elements))
+    }
+
+    fn parse_map_literal(&mut self) -> ParseResult<AstNode> {
+        self.expect(TokenType::OpenBrace)?;
+
+        let entries = self.parse_comma_separated(
+            |parser| {
+                let key = parser.parse_expression()?;
+                parser.expect(TokenType::Colon)?;
+                let value = parser.parse_expression()?;
+                Ok((key, value))
+            },
+            TokenType::CloseBrace,
+        )?;
+
+        self.expect(TokenType::CloseBrace)?;
+        Ok(AstNode::MapLiteral(entries))
+    }
+
+    fn is_binary_op(kind: TokenType) -> bool {
+        matches!(
+            kind,
+            TokenType::Gt
                 | TokenType::Lt
                 | TokenType::Eq
                 | TokenType::EqEq
@@ -106,72 +149,7 @@ impl<'a> Parser<'a> {
                 | TokenType::Arrow
                 | TokenType::FatArrow
                 | TokenType::RangeExc
-                | TokenType::RangeInc => {
-                    self.advance(); // now mutable borrow is fine
-                    let right = self.parse_expression()?;
-                    left = AstNode::BinaryExpr {
-                        left: Box::new(left),
-                        op: op_kind, // use the copied kind
-                        right: Box::new(right),
-                    };
-                }
-                _ => break,
-            }
-        }
-
-        Ok(left)
-    }
-
-    fn parse_array_literal(&mut self) -> ParseResult<AstNode> {
-        self.expect(TokenType::OpenBracket)?;
-        let mut elements = Vec::new();
-
-        while let Some(tok) = self.peek() {
-            if tok.kind == TokenType::CloseBracket {
-                break;
-            }
-
-            let expr = self.parse_expression()?;
-            elements.push(expr);
-
-            if let Some(tok) = self.peek() {
-                if tok.kind == TokenType::Comma {
-                    self.advance();
-                } else if tok.kind != TokenType::CloseBracket {
-                    return Err(ParseError::UnexpectedToken(format!(
-                        "Expected ',' or ']', got {:?}",
-                        tok.kind
-                    )));
-                }
-            }
-        }
-
-        self.expect(TokenType::CloseBracket)?;
-        Ok(AstNode::ArrayLiteral(elements))
-    }
-
-    fn parse_map_literal(&mut self) -> ParseResult<AstNode> {
-        self.expect(TokenType::OpenBrace)?;
-        let mut entries = Vec::new();
-
-        while let Some(tok) = self.peek() {
-            if tok.kind == TokenType::CloseBrace {
-                break;
-            }
-
-            let key = self.parse_expression()?;
-            self.expect(TokenType::Colon)?;
-            let value = self.parse_expression()?;
-            entries.push((key, value));
-
-            if let Some(tok) = self.peek() {
-                if tok.kind == TokenType::Comma {
-                    self.advance();
-                }
-            }
-        }
-
-        self.expect(TokenType::CloseBrace)?;
-        Ok(AstNode::MapLiteral(entries))
+                | TokenType::RangeInc
+        )
     }
 }

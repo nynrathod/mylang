@@ -10,9 +10,7 @@ impl<'a> Parser<'a> {
         loop {
             patterns.push(self.parse_pattern()?);
 
-            if self.peek_is(TokenType::Comma) {
-                self.advance(); // consume comma and continue
-            } else {
+            if !self.consume_if(TokenType::Comma) {
                 break;
             }
         }
@@ -59,9 +57,7 @@ impl<'a> Parser<'a> {
             let expr = self.parse_expression()?;
             args.push(expr);
 
-            if self.peek_is(TokenType::Comma) {
-                self.advance();
-            } else {
+            if !self.consume_if(TokenType::Comma) {
                 break;
             }
         }
@@ -83,9 +79,7 @@ impl<'a> Parser<'a> {
             let mut patterns = Vec::new();
             loop {
                 patterns.push(self.parse_pattern()?);
-                if self.peek_is(TokenType::Comma) {
-                    self.advance(); // consume comma
-                } else {
+                if !self.consume_if(TokenType::Comma) {
                     break;
                 }
             }
@@ -107,14 +101,70 @@ impl<'a> Parser<'a> {
             None
         };
 
-        self.expect(TokenType::OpenBrace)?;
-        let body = self.parse_block()?;
+        let body = self.parse_braced_block()?;
 
         Ok(AstNode::ForLoop {
             pattern,
             iterable,
             body,
         })
+    }
+
+    pub fn parse_conditional_decl(&mut self) -> ParseResult<AstNode> {
+        self.expect(TokenType::If)?; // consume 'if'
+
+        // condition expression
+        let condition = self.parse_expression()?;
+
+        // then block
+        let then_block = self.parse_braced_block()?; // parse statements until '}'
+
+        // optional else / else if
+        let mut else_branch = None;
+        if let Some(tok) = self.peek() {
+            if tok.kind == TokenType::Else {
+                self.advance(); // consume 'else'
+
+                if let Some(next) = self.peek() {
+                    if next.kind == TokenType::If {
+                        // else if -> recursive call
+                        let elseif = self.parse_conditional_decl()?;
+                        else_branch = Some(Box::new(elseif));
+                    } else {
+                        // else { ... }
+
+                        let else_block = self.parse_braced_block()?;
+                        else_branch = Some(Box::new(AstNode::Block(else_block)));
+                    }
+                }
+            }
+        }
+
+        Ok(AstNode::ConditionalDecl {
+            condition: Box::new(condition),
+            then_block,
+            else_branch,
+        })
+    }
+
+    pub fn parse_comma_separated<T>(
+        &mut self,
+        parse_item: impl Fn(&mut Self) -> ParseResult<T>,
+        end_token: TokenType,
+    ) -> ParseResult<Vec<T>> {
+        let mut items = Vec::new();
+
+        while !self.peek_is(end_token) {
+            let item = parse_item(self)?;
+            items.push(item);
+
+            // If no comma, we are done
+            if !self.consume_if(TokenType::Comma) {
+                break;
+            }
+        }
+
+        Ok(items)
     }
 
     pub fn parse_pattern(&mut self) -> ParseResult<Pattern> {
@@ -129,9 +179,7 @@ impl<'a> Parser<'a> {
                         let mut elements = Vec::new();
                         while !self.peek_is(TokenType::CloseParen) {
                             elements.push(self.parse_pattern()?);
-                            if self.peek_is(TokenType::Comma) {
-                                self.advance();
-                            } else {
+                            if !self.consume_if(TokenType::Comma) {
                                 break;
                             }
                         }
@@ -155,9 +203,7 @@ impl<'a> Parser<'a> {
                         let pat = self.parse_pattern()?;
                         elements.push(pat);
 
-                        if self.peek_is(TokenType::Comma) {
-                            self.advance(); // consume ','
-                        } else {
+                        if !self.consume_if(TokenType::Comma) {
                             break;
                         }
                     }
@@ -181,118 +227,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse_functional_decl(&mut self) -> ParseResult<AstNode> {
-        self.expect(TokenType::Function)?; // consume 'fn'
-
-        // function name
-        let name_tok = self.expect(TokenType::Identifier)?;
-        let func_name = name_tok.value.to_string();
-
-        let visibility = if func_name.chars().next().unwrap_or('a').is_uppercase() {
-            "Public".to_string()
-        } else {
-            "Private".to_string()
-        };
-
-        self.expect(TokenType::OpenParen)?; // consume '('
-
-        let mut params = Vec::new();
-
-        while let Some(tok) = self.peek() {
-            if tok.kind == TokenType::CloseParen {
-                break; // done with parameters
-            }
-
-            // parse parameter name
-            let param_name_tok = self.expect(TokenType::Identifier)?;
-            let param_name = param_name_tok.value.to_string();
-
-            // optional type
-            let mut param_type = None;
-            if let Some(tok) = self.peek() {
-                if tok.kind == TokenType::Colon {
-                    self.advance(); // consume ':'
-                    param_type = Some(self.parse_type_annotation()?);
-                }
-            }
-
-            params.push((param_name, param_type));
-
-            // consume comma if present
-            if let Some(tok) = self.peek() {
-                if tok.kind == TokenType::Comma {
-                    self.advance(); // consume ',' and continue
-                } else if tok.kind != TokenType::CloseParen {
-                    return Err(ParseError::UnexpectedToken(format!(
-                        "Expected ',' or ')', got {:?}",
-                        tok.kind
-                    )));
-                }
-            }
-        }
-
-        self.expect(TokenType::CloseParen)?; // consume ')'
-
-        // optional return type
-        let mut return_type = None;
-        if let Some(tok) = self.peek() {
-            if tok.kind == TokenType::Arrow {
-                // e.g., '->'
-                self.advance();
-                return_type = Some(self.parse_type_annotation()?); // or parse multiple types if you want
-            }
-        }
-
-        self.expect(TokenType::OpenBrace)?; // consume '{'
-        let body_block = self.parse_block()?; // parse function body
-
-        Ok(AstNode::FunctionDecl {
-            name: func_name,
-            visibility,
-            params,
-            return_type,
-            body: body_block,
-        })
-    }
-
-    pub fn parse_conditional_decl(&mut self) -> ParseResult<AstNode> {
-        self.expect(TokenType::If)?; // consume 'if'
-
-        // condition expression
-        let condition = self.parse_expression()?;
-
-        // then block
-        self.expect(TokenType::OpenBrace)?;
-        let then_block = self.parse_block()?; // parse statements until '}'
-
-        // optional else / else if
-        let mut else_branch = None;
-        if let Some(tok) = self.peek() {
-            if tok.kind == TokenType::Else {
-                self.advance(); // consume 'else'
-
-                if let Some(next) = self.peek() {
-                    if next.kind == TokenType::If {
-                        // else if -> recursive call
-                        let elseif = self.parse_conditional_decl()?;
-                        else_branch = Some(Box::new(elseif));
-                    } else {
-                        // else { ... }
-                        self.expect(TokenType::OpenBrace)?;
-                        let else_block = self.parse_block()?;
-                        else_branch = Some(Box::new(AstNode::Block(else_block)));
-                    }
-                }
-            }
-        }
-
-        Ok(AstNode::ConditionalDecl {
-            condition: Box::new(condition),
-            then_block,
-            else_branch,
-        })
-    }
-
     fn parse_block(&mut self) -> ParseResult<Vec<AstNode>> {
         let mut stmts = Vec::new();
         while let Some(tok) = self.peek() {
@@ -304,122 +238,9 @@ impl<'a> Parser<'a> {
         self.expect(TokenType::CloseBrace)?; // consume '}'
         Ok(stmts)
     }
-    pub fn parse_enum_decl(&mut self) -> ParseResult<AstNode> {
-        self.expect(TokenType::Enum)?; // consume 'enum'
 
-        let name_tok = self.expect(TokenType::Identifier)?;
-        let struct_name = name_tok.value.to_string();
-
+    pub fn parse_braced_block(&mut self) -> ParseResult<Vec<AstNode>> {
         self.expect(TokenType::OpenBrace)?;
-
-        let mut variants = Vec::new();
-        while let Some(tok) = self.peek() {
-            if tok.kind == TokenType::CloseBrace {
-                break;
-            }
-            // 1. Parse variant name
-            let variant_name_tok = self.expect(TokenType::Identifier)?;
-            let variant_name = variant_name_tok.value.to_string();
-
-            let mut variant_data = None;
-
-            // 2. Check if variant has associated types (inside parentheses)
-            if let Some(tok) = self.peek() {
-                if tok.kind == TokenType::OpenParen {
-                    self.advance(); // consume '('
-
-                    // Parse one or more type annotations for this variant
-                    let types = self.parse_type_annotation()?; // or a loop if multiple types
-                    variant_data = Some(types);
-
-                    self.expect(TokenType::CloseParen)?; // consume ')'
-                }
-            }
-
-            // 3. Push the variant to the enum
-            variants.push((variant_name, variant_data));
-
-            if let Some(tok) = self.peek() {
-                if tok.kind == TokenType::Comma {
-                    self.advance();
-                }
-            }
-        }
-
-        self.expect(TokenType::CloseBrace)?;
-
-        Ok(AstNode::EnumDecl {
-            name: struct_name,
-            variants,
-        })
-    }
-
-    pub fn parse_struct_decl(&mut self) -> ParseResult<AstNode> {
-        self.expect(TokenType::Struct)?; // consume 'struct'
-
-        let name_tok = self.expect(TokenType::Identifier)?;
-        let struct_name = name_tok.value.to_string();
-
-        self.expect(TokenType::OpenBrace)?;
-
-        let mut fields = Vec::new();
-        while let Some(tok) = self.peek() {
-            if tok.kind == TokenType::CloseBrace {
-                break;
-            }
-            let field_name_tok = self.expect(TokenType::Identifier)?;
-            let field_name = field_name_tok.value.to_string();
-
-            self.expect(TokenType::Colon)?;
-            let field_type = self.parse_type_annotation()?;
-
-            fields.push((field_name, field_type));
-
-            if let Some(tok) = self.peek() {
-                if tok.kind == TokenType::Comma {
-                    self.advance();
-                }
-            }
-        }
-
-        self.expect(TokenType::CloseBrace)?;
-
-        Ok(AstNode::StructDecl {
-            name: struct_name,
-            fields,
-        })
-    }
-
-    pub fn parse_var_decl(&mut self) -> ParseResult<AstNode> {
-        let first_tok = self.advance().ok_or(ParseError::EndOfInput)?;
-        let mutable = match first_tok.kind {
-            TokenType::Let => false,
-            TokenType::Var => true,
-            _ => return Err(ParseError::UnexpectedToken("Expected let or var".into())),
-        };
-
-        let name_tok = self.expect(TokenType::Identifier)?;
-        let name = name_tok.value.to_string();
-
-        let mut type_annotation = None;
-        if let Some(tok) = self.peek() {
-            if tok.kind == TokenType::Colon {
-                self.advance(); // consume ':'
-                let parsed_type = self.parse_type_annotation()?;
-                type_annotation = Some(parsed_type);
-            }
-        }
-
-        self.expect(TokenType::Eq)?;
-        let value = self.parse_expression()?;
-
-        self.expect(TokenType::Semi)?;
-
-        Ok(AstNode::VarDecl {
-            mutable,
-            name,
-            type_annotation,
-            value: Box::new(value),
-        })
+        self.parse_block()
     }
 }

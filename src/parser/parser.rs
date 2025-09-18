@@ -1,6 +1,7 @@
 use crate::lexar::token::{Token, TokenType};
-use crate::parser::ast::{AstNode, TypeNode};
+use crate::parser::ast::AstNode;
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum ParseError {
     UnexpectedToken(String),
@@ -33,6 +34,15 @@ impl<'a> Parser<'a> {
             self.current += 1;
         }
         tok
+    }
+
+    pub(crate) fn consume_if(&mut self, kind: TokenType) -> bool {
+        if self.peek_is(kind) {
+            self.advance();
+            true
+        } else {
+            false
+        }
     }
 
     pub(crate) fn expect(&mut self, kind: TokenType) -> ParseResult<&Token<'a>> {
@@ -107,40 +117,5 @@ impl<'a> Parser<'a> {
             statements.push(stmt);
         }
         Ok(AstNode::Program(statements))
-    }
-
-    pub(crate) fn parse_type_annotation(&mut self) -> ParseResult<TypeNode> {
-        let tok = self.peek().ok_or(ParseError::EndOfInput)?;
-        if tok.kind != TokenType::Identifier {
-            return Err(ParseError::UnexpectedToken(
-                "Expected type Identifier".into(),
-            ));
-        }
-
-        let tok = self.advance().unwrap();
-
-        match tok.value {
-            "Int" => Ok(TypeNode::Int),
-            "String" => Ok(TypeNode::String),
-            "Bool" => Ok(TypeNode::Bool),
-            "Array" => {
-                self.expect(TokenType::Lt)?;
-                let inner_type = self.parse_type_annotation()?;
-                self.expect(TokenType::Gt)?;
-                Ok(TypeNode::Array(Box::new(inner_type)))
-            }
-            "Map" => {
-                self.expect(TokenType::Lt)?;
-                let key_type = self.parse_type_annotation()?;
-                self.expect(TokenType::Comma)?;
-                let value_type = self.parse_type_annotation()?;
-                self.expect(TokenType::Gt)?;
-                Ok(TypeNode::Map(Box::new(key_type), Box::new(value_type)))
-            }
-            _ => Err(ParseError::UnexpectedToken(format!(
-                "Expected type identifier, got {}",
-                tok.value
-            ))),
-        }
     }
 }

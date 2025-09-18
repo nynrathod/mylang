@@ -1,81 +1,87 @@
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TokenType {
-    // Keywords
-    Let, // immutable
-    Var, // mutable
-    Function,
-    Import,
-    Struct,
-    Enum,
+    // --- Keywords ---
+    Let,      // let (immutable)
+    Var,      // var (mutable)
+    Function, // function
+    Import,   // import
+    Struct,   // struct
+    Enum,     // enum
+    Map,      // map
+    If,       // if
+    Else,     // else
+    For,      // for
+    In,       // in
+    Return,   // return
+    Break,    // break
+    Continue, // continue
+    Some,     // some
+    Print,    // print
 
-    Map,
-    If,
-    Else,
-    For,
-    Return,
-    Break,
-    Continue,
-    In,
-    Some,
-    Print,
-
-    // Literals
+    // --- Literals ---
     Number,
     String,
     Boolean,
 
-    // Identifiers
+    // --- Identifier ---
     Identifier,
 
-    // Operators
-    Plus,    // `+`,
-    Minus,   // `-`
-    Star,    // `*`
-    Slash,   // `/`
-    Percent, // `%`
+    // --- Operators ---
+    // Arithmetic
+    Plus,    // +
+    Minus,   // -
+    Star,    // *
+    Slash,   // /
+    Percent, // %
 
-    Bang,      // `!`
-    Lt,        // `<`
-    Gt,        // `>`
-    And,       // `&`
-    Or,        // `|`,
-    Eq,        // `=`
-    EqEq,      // `==`
-    EqEqEq,    // `===`
-    NotEq,     // `!=`
-    NotEqEq,   // `!==`
-    GtEq,      // `>=`
-    LtEq,      // `<=`
-    AndAnd,    // `&&`
-    OrOr,      // `||`
-    PlusEq,    // `+=`
-    MinusEq,   // `-=`
-    StarEq,    // `*=`
-    SlashEq,   // `/=`
-    PercentEq, // `%=`
-    Arrow,     // `->`
-    FatArrow,  // `=>`
+    // Assignment
+    Eq,        // =
+    PlusEq,    // +=
+    MinusEq,   // -=
+    StarEq,    // *=
+    SlashEq,   // /=
+    PercentEq, // %=
 
-    // Delimiters
-    OpenParen,    // `(`
-    CloseParen,   // `)`
-    OpenBrace,    // `{`
-    CloseBrace,   // `}`
-    OpenBracket,  // `[`
-    CloseBracket, // `]`
-    Comma,        // `,`
-    Semi,         // `;`
-    Dot,          // `.`
-    RangeExc,     // `..=`
-    RangeInc,     // `..`
-    Colon,        // `:`,
-    At,           // `@`
-    Pound,        // `#`
-    Tilde,        // `~`
-    Question,     // `?`
-    Dollar,       // `$`
+    // Comparison
+    EqEq,    // ==
+    EqEqEq,  // ===
+    NotEq,   // !=
+    NotEqEq, // !==
+    Gt,      // >
+    Lt,      // <
+    GtEq,    // >=
+    LtEq,    // <=
 
-    Underscore, // `_`
+    // Logical
+    Bang,   // !
+    And,    // &
+    Or,     // |
+    AndAnd, // &&
+    OrOr,   // ||
+
+    // Arrow
+    Arrow,    // ->
+    FatArrow, // =>
+
+    // --- Delimiters & Punctuation ---
+    OpenParen,    // (
+    CloseParen,   // )
+    OpenBrace,    // {
+    CloseBrace,   // }
+    OpenBracket,  // [
+    CloseBracket, // ]
+    Comma,        // ,
+    Semi,         // ;
+    Dot,          // .
+    RangeInc,     // ..
+    RangeExc,     // ..=
+    Colon,        // :
+    At,           // @
+    Pound,        // #
+    Tilde,        // ~
+    Question,     // ?
+    Dollar,       // $
+    Underscore,   // _
 }
 
 #[derive(Debug, Clone)]
