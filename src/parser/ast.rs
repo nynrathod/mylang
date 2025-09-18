@@ -53,6 +53,9 @@ pub enum AstNode {
         else_branch: Option<Box<AstNode>>,
     },
     Block(Vec<AstNode>),
+    Return {
+        values: Vec<AstNode>, // multiple expressions can be returned
+    },
 
     FunctionDecl {
         name: String,

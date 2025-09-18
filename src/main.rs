@@ -73,34 +73,33 @@ fn main() {
     //     // ";
     // make recursion in rust
 
-    let input = r#"
-        fn GetUser(a: Int, b: Int) -> String {}
-        fn GetUser(a: String) -> String {}
-        fn GetUser(a: Int, b: Int) -> Int {}
-        fn GetUser(a: String) -> String {}
-        fn GetUser(a: Int, b: Int) {}
-        fn GetUser(a: String) {}
-        fn GetUser() {}
-        fn GetUser() -> Int {}
-        fn GetUser(a: Array<Int>) -> Array<Int> {}
-        fn GetUser(a: Map<String, Int>) -> Map<String, Int> {}
-        fn GetUser(a: Int, b: String) -> Bool {}
-        fn GetUser(a: Bool) -> Bool {}
-        fn GetUser(a: Int) {}
-        fn GetUser(a: Int) -> Int {}
-        fn GetUser(a: String, b: String) -> String {}
-        fn GetUser(a: Array<String>) -> Array<String> {}
+    // let input = r#"
+    //     fn GetUser(a: Int, b: Int) -> String {}
+    //     fn GetUser(a: String) -> String {}
+    //     fn GetUser(a: Int, b: Int) -> Int {}
+    //     fn GetUser(a: String) -> String {}
+    //     fn GetUser(a: Int, b: Int) {}
+    //     fn GetUser(a: String) {}
+    //     fn GetUser() {}
+    //     fn GetUser() -> Int {}
+    //     fn GetUser(a: Array<Int>) -> Array<Int> {}
+    //     fn GetUser(a: Map<String, Int>) -> Map<String, Int> {}
+    //     fn GetUser(a: Int, b: String) -> Bool {}
+    //     fn GetUser(a: Bool) -> Bool {}
+    //     fn GetUser(a: Int) {}
+    //     fn GetUser(a: Int) -> Int {}
+    //     fn GetUser(a: String, b: String) -> String {}
+    //     fn GetUser(a: Array<String>) -> Array<String> {}
 
-        fn GetUser(a: Int, b: Int, c: Int) -> Int {}
-        fn GetUser(a: Int, b: Int, c: Int) {}
-        fn getUser(a: Map<String, String>) -> Map<String, String> {
-            if a > b {
+    //     fn GetUser(a: Int, b: Int, c: Int) -> Int {}
+    //     fn GetUser(a: Int, b: Int, c: Int) {}
+    //     fn getUser(a: Map<String, String>) -> Map<String, String> {
+    //     let nums: Array<Int> = [1, 2, 3, 4];
+    //     return nums, 5;
+    //     }
+    // "#;
 
-            } else if b < c {
-               	let nums: Array<Int> = [1, 2, 3, 4];
-                }
-        }
-    "#;
+    let input = "0..5; 0..=6;";
 
     // let input = fs::read_to_string("./syntax.mylang").unwrap();
     // println!("Source code:\n{}", input);

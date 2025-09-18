@@ -85,3 +85,37 @@ fn getUser() { }
 
 // function with return type
 fn getUser() Map<String,String> { }
+
+
+
+
+
+for i in 0..10 {
+    print(i)   // 0 to 9
+}
+
+for i in 0..=10 {
+    print(i)   // 0 to 10 (inclusive)
+}
+
+let arr = [1,2,3]
+for item in arr {
+    print(item)
+}
+
+let map = {"a": 1, "b": 2}
+for key, value in map {
+    print(key, value)
+}
+
+for {
+    print("running forever")
+}
+
+for (key, value) in map {
+    print(key, value)
+}
+
+for Some(x) in maybeValue {
+    print("found", x)
+}

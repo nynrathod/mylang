@@ -21,6 +21,8 @@ pub fn lex(input: &str) -> Vec<Token> {
     keywords.insert("return", TokenType::Return);
     keywords.insert("break", TokenType::Break);
     keywords.insert("continue", TokenType::Continue);
+    keywords.insert("in", TokenType::In);
+    keywords.insert("some", TokenType::Some);
     keywords.insert("true", TokenType::Boolean);
     keywords.insert("false", TokenType::Boolean);
 
@@ -64,6 +66,9 @@ pub fn lex(input: &str) -> Vec<Token> {
     operators.insert(",", TokenType::Comma);
     operators.insert(";", TokenType::Semi);
     operators.insert(".", TokenType::Dot);
+    operators.insert("..", TokenType::RangeExc);
+    operators.insert("..=", TokenType::RangeInc);
+
     operators.insert(":", TokenType::Colon);
     operators.insert("@", TokenType::At);
     operators.insert("#", TokenType::Pound);

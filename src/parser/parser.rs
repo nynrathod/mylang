@@ -41,6 +41,26 @@ impl<'a> Parser<'a> {
             None => Err(ParseError::EndOfInput),
         }
     }
+    fn parse_return(&mut self) -> ParseResult<AstNode> {
+        self.expect(TokenType::Return)?; // consume 'return'
+
+        let mut values = Vec::new();
+
+        loop {
+            let expr = self.parse_expression()?;
+            values.push(expr);
+
+            match self.peek() {
+                Some(tok) if tok.kind == TokenType::Comma => {
+                    self.advance(); // consume ',' and continue parsing next expression
+                }
+                _ => break, // no more expressions
+            }
+        }
+
+        self.expect(TokenType::Semi)?; // consume ';' at the end
+        Ok(AstNode::Return { values })
+    }
 
     pub fn parse_statement(&mut self) -> ParseResult<AstNode> {
         match self.peek() {
@@ -49,6 +69,7 @@ impl<'a> Parser<'a> {
                 TokenType::Struct => self.parse_struct_decl(),
                 TokenType::Enum => self.parse_enum_decl(),
                 TokenType::If => self.parse_conditional_decl(),
+                TokenType::Return => self.parse_return(),
                 TokenType::Function => self.parse_functional_decl(),
                 _ => Err(ParseError::UnexpectedToken(format!(
                     "Unexpected token: {:?}",
