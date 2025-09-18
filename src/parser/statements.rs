@@ -1,8 +1,186 @@
 use crate::lexar::token::TokenType;
-use crate::parser::ast::AstNode;
+use crate::parser::ast::{AstNode, Pattern};
 use crate::parser::{ParseError, ParseResult, Parser};
 
 impl<'a> Parser<'a> {
+    pub fn parse_assignment(&mut self) -> ParseResult<AstNode> {
+        let mut patterns = Vec::new();
+
+        // parse comma-separated LHS patterns
+        loop {
+            patterns.push(self.parse_pattern()?);
+
+            if self.peek_is(TokenType::Comma) {
+                self.advance(); // consume comma and continue
+            } else {
+                break;
+            }
+        }
+
+        // now we must have '=' after LHS
+        self.expect(TokenType::Eq)?;
+
+        // parse RHS expression (could be a function call or any expression)
+        let rhs = self.parse_expression()?;
+
+        // expect semicolon to finish the statement
+        self.expect(TokenType::Semi)?;
+
+        let lhs_pattern = if patterns.len() == 1 {
+            patterns.remove(0)
+        } else {
+            Pattern::Tuple(patterns)
+        };
+
+        Ok(AstNode::Assignment {
+            pattern: lhs_pattern,
+            value: Box::new(rhs),
+        })
+    }
+
+    pub fn parse_break(&mut self) -> ParseResult<AstNode> {
+        self.expect(TokenType::Break)?; // consume 'break'
+        self.expect(TokenType::Semi)?; // consume ';'
+        Ok(AstNode::Break)
+    }
+
+    pub fn parse_continue(&mut self) -> ParseResult<AstNode> {
+        self.expect(TokenType::Continue)?; // consume 'continue'
+        self.expect(TokenType::Semi)?; // consume ';'
+        Ok(AstNode::Continue)
+    }
+
+    pub fn parse_print(&mut self) -> ParseResult<AstNode> {
+        self.expect(TokenType::Print)?;
+        self.expect(TokenType::OpenParen)?;
+
+        let mut args = Vec::new();
+        while !self.peek_is(TokenType::CloseParen) {
+            let expr = self.parse_expression()?;
+            args.push(expr);
+
+            if self.peek_is(TokenType::Comma) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        self.expect(TokenType::CloseParen)?;
+        self.expect(TokenType::Semi)?;
+
+        Ok(AstNode::Print { exprs: args })
+    }
+
+    pub fn parse_for_decl(&mut self) -> ParseResult<AstNode> {
+        self.expect(TokenType::For)?;
+
+        // optional pattern
+        let pattern = if self.peek_is(TokenType::OpenBrace) {
+            Pattern::Wildcard // `for { ... }` infinite loop
+        } else {
+            // parse comma-separated patterns for tuples
+            let mut patterns = Vec::new();
+            loop {
+                patterns.push(self.parse_pattern()?);
+                if self.peek_is(TokenType::Comma) {
+                    self.advance(); // consume comma
+                } else {
+                    break;
+                }
+            }
+
+            if patterns.len() == 1 {
+                patterns.remove(0)
+            } else {
+                Pattern::Tuple(patterns)
+            }
+        };
+
+        // optional iterable
+        let iterable = if self.peek_is(TokenType::In) {
+            self.advance(); // consume 'in'
+            Some(Box::new(self.parse_expression()?))
+        } else if !self.peek_is(TokenType::OpenBrace) {
+            Some(Box::new(self.parse_expression()?))
+        } else {
+            None
+        };
+
+        self.expect(TokenType::OpenBrace)?;
+        let body = self.parse_block()?;
+
+        Ok(AstNode::ForLoop {
+            pattern,
+            iterable,
+            body,
+        })
+    }
+
+    pub fn parse_pattern(&mut self) -> ParseResult<Pattern> {
+        if let Some(tok) = self.peek() {
+            match tok.kind {
+                TokenType::Identifier | TokenType::Some => {
+                    let name = tok.value.to_string();
+                    self.advance();
+
+                    if self.peek_is(TokenType::OpenParen) {
+                        self.advance(); // consume '('
+                        let mut elements = Vec::new();
+                        while !self.peek_is(TokenType::CloseParen) {
+                            elements.push(self.parse_pattern()?);
+                            if self.peek_is(TokenType::Comma) {
+                                self.advance();
+                            } else {
+                                break;
+                            }
+                        }
+                        self.expect(TokenType::CloseParen)?;
+                        let inner_pattern = if elements.len() == 1 {
+                            Box::new(elements.remove(0))
+                        } else {
+                            Box::new(Pattern::Tuple(elements))
+                        };
+                        return Ok(Pattern::EnumVariant(name, inner_pattern));
+                    }
+
+                    Ok(Pattern::Identifier(name))
+                }
+
+                TokenType::OpenParen => {
+                    self.advance(); // consume '('
+                    let mut elements = Vec::new();
+
+                    while !self.peek_is(TokenType::CloseParen) {
+                        let pat = self.parse_pattern()?;
+                        elements.push(pat);
+
+                        if self.peek_is(TokenType::Comma) {
+                            self.advance(); // consume ','
+                        } else {
+                            break;
+                        }
+                    }
+
+                    self.expect(TokenType::CloseParen)?;
+                    Ok(Pattern::Tuple(elements))
+                }
+
+                TokenType::Underscore => {
+                    self.advance();
+                    Ok(Pattern::Wildcard)
+                }
+
+                _ => Err(ParseError::UnexpectedToken(format!(
+                    "Unexpected token {:?} in pattern",
+                    tok.kind
+                ))),
+            }
+        } else {
+            Err(ParseError::EndOfInput)
+        }
+    }
+
     pub fn parse_functional_decl(&mut self) -> ParseResult<AstNode> {
         self.expect(TokenType::Function)?; // consume 'fn'
 

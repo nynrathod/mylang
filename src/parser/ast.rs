@@ -10,6 +10,14 @@ pub enum TypeNode {
 }
 
 #[derive(Debug, Clone)]
+pub enum Pattern {
+    Identifier(String),
+    Tuple(Vec<Pattern>),
+    Wildcard,
+    EnumVariant(String, Box<Pattern>),
+}
+
+#[derive(Debug, Clone)]
 pub enum AstNode {
     Program(Vec<AstNode>),
     NumberLiteral(i64),
@@ -56,6 +64,16 @@ pub enum AstNode {
     Return {
         values: Vec<AstNode>, // multiple expressions can be returned
     },
+    Print {
+        exprs: Vec<AstNode>,
+    },
+    Break,
+    Continue,
+
+    Assignment {
+        pattern: Pattern,
+        value: Box<AstNode>,
+    },
 
     FunctionDecl {
         name: String,
@@ -63,5 +81,15 @@ pub enum AstNode {
         params: Vec<(String, Option<TypeNode>)>,
         return_type: Option<TypeNode>,
         body: Vec<AstNode>,
+    },
+    FunctionCall {
+        func: Box<AstNode>, // usually an Identifier node
+        args: Vec<AstNode>,
+    },
+
+    ForLoop {
+        pattern: Pattern,
+        iterable: Option<Box<AstNode>>,
+        body: Vec<AstNode>, // keep Vec (block already returns Vec)
     },
 }

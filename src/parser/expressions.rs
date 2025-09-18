@@ -27,8 +27,30 @@ impl<'a> Parser<'a> {
                 }
                 TokenType::Identifier => {
                     let tok = self.advance().unwrap();
-                    AstNode::Identifier(tok.value.to_string())
+                    let name = tok.value.to_string();
+
+                    // Check for function call
+                    if self.peek_is(TokenType::OpenParen) {
+                        self.advance(); // consume '('
+                        let mut args = Vec::new();
+                        while !self.peek_is(TokenType::CloseParen) {
+                            args.push(self.parse_expression()?); // recursive parse
+                            if self.peek_is(TokenType::Comma) {
+                                self.advance(); // consume ','
+                            } else {
+                                break;
+                            }
+                        }
+                        self.expect(TokenType::CloseParen)?;
+                        return Ok(AstNode::FunctionCall {
+                            func: Box::new(AstNode::Identifier(name)), // wrap the function name as Identifier
+                            args,                                      // your parsed arguments
+                        });
+                    }
+
+                    AstNode::Identifier(name)
                 }
+
                 TokenType::String => {
                     let tok = self.advance().unwrap();
                     AstNode::StringLiteral(tok.value.to_string())
@@ -82,7 +104,9 @@ impl<'a> Parser<'a> {
                 | TokenType::SlashEq
                 | TokenType::PercentEq
                 | TokenType::Arrow
-                | TokenType::FatArrow => {
+                | TokenType::FatArrow
+                | TokenType::RangeExc
+                | TokenType::RangeInc => {
                     self.advance(); // now mutable borrow is fine
                     let right = self.parse_expression()?;
                     left = AstNode::BinaryExpr {

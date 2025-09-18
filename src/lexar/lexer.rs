@@ -22,7 +22,8 @@ pub fn lex(input: &str) -> Vec<Token> {
     keywords.insert("break", TokenType::Break);
     keywords.insert("continue", TokenType::Continue);
     keywords.insert("in", TokenType::In);
-    keywords.insert("some", TokenType::Some);
+    keywords.insert("Some", TokenType::Some);
+    keywords.insert("print", TokenType::Print);
     keywords.insert("true", TokenType::Boolean);
     keywords.insert("false", TokenType::Boolean);
 
@@ -66,8 +67,8 @@ pub fn lex(input: &str) -> Vec<Token> {
     operators.insert(",", TokenType::Comma);
     operators.insert(";", TokenType::Semi);
     operators.insert(".", TokenType::Dot);
-    operators.insert("..", TokenType::RangeExc);
     operators.insert("..=", TokenType::RangeInc);
+    operators.insert("..", TokenType::RangeExc);
 
     operators.insert(":", TokenType::Colon);
     operators.insert("@", TokenType::At);
@@ -87,6 +88,32 @@ pub fn lex(input: &str) -> Vec<Token> {
         // Skip whitespace
         if c.is_whitespace() {
             i += 1;
+            continue;
+        }
+
+        if c == '/' && i + 1 < chars.len() && chars[i + 1] == '/' {
+            // Skip until newline
+            i += 2; // skip the `//`
+            while i < chars.len() && chars[i] != '\n' {
+                i += 1;
+            }
+            continue; // go to next iteration
+        }
+
+        // Multi-character operators first
+        if i + 3 <= chars.len() && &input[i..i + 3] == "..=" {
+            tokens.push(Token {
+                kind: TokenType::RangeInc, // inclusive
+                value: "..=",
+            });
+            i += 3;
+            continue;
+        } else if i + 2 <= chars.len() && &input[i..i + 2] == ".." {
+            tokens.push(Token {
+                kind: TokenType::RangeExc, // exclusive
+                value: "..",
+            });
+            i += 2;
             continue;
         }
 

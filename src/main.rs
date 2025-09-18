@@ -6,6 +6,14 @@ use parser::Parser;
 
 fn main() {
     // let input = r#"
+    //     let a = 5;
+    // 	var b = "hello";
+    // 	let isAdmin: Bool = true;
+    // 	let age: Int = 42;
+    // 	let nums: Array<Int> = [1, 2, 3, 4];
+    // 	let	user: Map<String, String> = {"name": "Alice", "role": "admin"};
+    // 	let userName: String = "Nayan";
+    // 	let userData: Array<String> = ["Nayan", "Rathod"];
     //     let a = b + c;
     //     let a = b - c;
     //     let a = b * c;
@@ -70,8 +78,8 @@ fn main() {
     //     if b > c {if a > b {
     //     let c = 11-2;
     //     }}
-    //     // ";
-    // make recursion in rust
+    //      ";
+    // // make recursion in rust
 
     // let input = r#"
     //     fn GetUser(a: Int, b: Int) -> String {}
@@ -99,7 +107,65 @@ fn main() {
     //     }
     // "#;
 
-    let input = "0..5; 0..=6;";
+    // let input = r#"
+    //     for i in 0..10 {
+    //     if b > c {
+    //     continue;
+    //         if a > b {
+    //                 let c = 11-2;
+    //                 break;
+    //             }
+    //         }
+    //     }
+
+    //     for i in 0..=10 {
+
+    //     }
+
+    //     let arr = [1,2,3];
+    //     for item in arr {
+
+    //     }
+
+    //     let item = {"a": 1, "b": 2};
+    //     for key, value in item {
+    //     }
+
+    //     for {
+
+    //     }
+
+    //     for (key, value) in item {
+
+    //     }
+
+    //     for Some(x) in maybeValue {
+
+    //     }
+    // "#;
+
+    // let input = r#"print();
+    //     print("");
+    //     print("Hello");
+    //     print(5);
+
+    //     print(a);
+    //     print(myVar);
+    //     print(a, b, "hello", 5);
+    //     print("Value:", x);
+    //     print(a + b);
+    //     print(f(x, y));
+    //     print(true);
+    //     print(false);
+    //     print(None);"#;
+
+    let input = r#"
+        // sadkjhas
+       	data, info, user = GetUser(5); // newcom
+        _, info = GetUser();
+        x = 5;
+
+        "#;
 
     // let input = fs::read_to_string("./syntax.mylang").unwrap();
     // println!("Source code:\n{}", input);

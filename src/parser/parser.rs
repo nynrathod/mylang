@@ -23,6 +23,10 @@ impl<'a> Parser<'a> {
         self.tokens.get(self.current)
     }
 
+    pub(crate) fn peek_is(&self, kind: TokenType) -> bool {
+        self.peek().map(|tok| tok.kind == kind).unwrap_or(false)
+    }
+
     pub(crate) fn advance(&mut self) -> Option<&Token<'a>> {
         let tok = self.tokens.get(self.current);
         if tok.is_some() {
@@ -70,7 +74,23 @@ impl<'a> Parser<'a> {
                 TokenType::Enum => self.parse_enum_decl(),
                 TokenType::If => self.parse_conditional_decl(),
                 TokenType::Return => self.parse_return(),
+                TokenType::Print => self.parse_print(),
+                TokenType::Break => self.parse_break(),
+                TokenType::Continue => self.parse_continue(),
                 TokenType::Function => self.parse_functional_decl(),
+                TokenType::For => self.parse_for_decl(),
+                TokenType::Identifier | TokenType::Underscore | TokenType::OpenParen => {
+                    // Try assignment first
+                    if let Ok(assign) = self.parse_assignment() {
+                        return Ok(assign);
+                    } else {
+                        // fallback: expression statement
+                        let expr = self.parse_expression()?;
+                        self.expect(TokenType::Semi)?;
+                        Ok(expr)
+                    }
+                }
+
                 _ => Err(ParseError::UnexpectedToken(format!(
                     "Unexpected token: {:?}",
                     tok.kind
@@ -90,17 +110,23 @@ impl<'a> Parser<'a> {
     }
 
     pub(crate) fn parse_type_annotation(&mut self) -> ParseResult<TypeNode> {
-        // e.g., "Int", "Array", "Map", "String"
-        let tok = self.expect(TokenType::Identifier)?;
+        let tok = self.peek().ok_or(ParseError::EndOfInput)?;
+        if tok.kind != TokenType::Identifier {
+            return Err(ParseError::UnexpectedToken(
+                "Expected type Identifier".into(),
+            ));
+        }
+
+        let tok = self.advance().unwrap();
 
         match tok.value {
             "Int" => Ok(TypeNode::Int),
             "String" => Ok(TypeNode::String),
             "Bool" => Ok(TypeNode::Bool),
             "Array" => {
-                self.expect(TokenType::Lt)?; // expect '<'
+                self.expect(TokenType::Lt)?;
                 let inner_type = self.parse_type_annotation()?;
-                self.expect(TokenType::Gt)?; // expect '>'
+                self.expect(TokenType::Gt)?;
                 Ok(TypeNode::Array(Box::new(inner_type)))
             }
             "Map" => {
@@ -111,13 +137,10 @@ impl<'a> Parser<'a> {
                 self.expect(TokenType::Gt)?;
                 Ok(TypeNode::Map(Box::new(key_type), Box::new(value_type)))
             }
-
-            _ => {
-                return Err(ParseError::UnexpectedToken(format!(
-                    "Expected type {:?}",
-                    tok.kind
-                )))
-            }
+            _ => Err(ParseError::UnexpectedToken(format!(
+                "Expected type identifier, got {}",
+                tok.value
+            ))),
         }
     }
 }

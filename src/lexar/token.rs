@@ -17,6 +17,7 @@ pub enum TokenType {
     Continue,
     In,
     Some,
+    Print,
 
     // Literals
     Number,
@@ -65,8 +66,8 @@ pub enum TokenType {
     Comma,        // `,`
     Semi,         // `;`
     Dot,          // `.`
-    RangeInc,     // `..`
     RangeExc,     // `..=`
+    RangeInc,     // `..`
     Colon,        // `:`,
     At,           // `@`
     Pound,        // `#`
