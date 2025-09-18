@@ -68,7 +68,7 @@ impl<'a> Parser<'a> {
         Ok(AstNode::Print { exprs: args })
     }
 
-    pub fn parse_for_decl(&mut self) -> ParseResult<AstNode> {
+    pub fn parse_for_stmt(&mut self) -> ParseResult<AstNode> {
         self.expect(TokenType::For)?;
 
         // optional pattern
@@ -103,14 +103,14 @@ impl<'a> Parser<'a> {
 
         let body = self.parse_braced_block()?;
 
-        Ok(AstNode::ForLoop {
+        Ok(AstNode::ForLoopStmt {
             pattern,
             iterable,
             body,
         })
     }
 
-    pub fn parse_conditional_decl(&mut self) -> ParseResult<AstNode> {
+    pub fn parse_conditional_stmt(&mut self) -> ParseResult<AstNode> {
         self.expect(TokenType::If)?; // consume 'if'
 
         // condition expression
@@ -128,7 +128,7 @@ impl<'a> Parser<'a> {
                 if let Some(next) = self.peek() {
                     if next.kind == TokenType::If {
                         // else if -> recursive call
-                        let elseif = self.parse_conditional_decl()?;
+                        let elseif = self.parse_conditional_stmt()?;
                         else_branch = Some(Box::new(elseif));
                     } else {
                         // else { ... }
@@ -140,7 +140,7 @@ impl<'a> Parser<'a> {
             }
         }
 
-        Ok(AstNode::ConditionalDecl {
+        Ok(AstNode::ConditionalStmt {
             condition: Box::new(condition),
             then_block,
             else_branch,

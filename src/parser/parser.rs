@@ -82,13 +82,13 @@ impl<'a> Parser<'a> {
                 TokenType::Let | TokenType::Var => self.parse_var_decl(),
                 TokenType::Struct => self.parse_struct_decl(),
                 TokenType::Enum => self.parse_enum_decl(),
-                TokenType::If => self.parse_conditional_decl(),
+                TokenType::If => self.parse_conditional_stmt(),
                 TokenType::Return => self.parse_return(),
                 TokenType::Print => self.parse_print(),
                 TokenType::Break => self.parse_break(),
                 TokenType::Continue => self.parse_continue(),
                 TokenType::Function => self.parse_functional_decl(),
-                TokenType::For => self.parse_for_decl(),
+                TokenType::For => self.parse_for_stmt(),
                 TokenType::Identifier | TokenType::Underscore | TokenType::OpenParen => {
                     // Try assignment first
                     if let Ok(assign) = self.parse_assignment() {

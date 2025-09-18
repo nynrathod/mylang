@@ -109,7 +109,7 @@ impl<'a> Parser<'a> {
 
         self.expect(TokenType::Semi)?;
 
-        Ok(AstNode::VarDecl {
+        Ok(AstNode::LetDecl {
             mutable,
             name,
             type_annotation,

@@ -40,7 +40,7 @@ pub enum AstNode {
         right: Box<AstNode>,
     },
 
-    VarDecl {
+    LetDecl {
         mutable: bool,
         type_annotation: Option<TypeNode>,
         name: String,
@@ -57,7 +57,7 @@ pub enum AstNode {
         variants: Vec<(String, Option<TypeNode>)>,
     },
 
-    ConditionalDecl {
+    ConditionalStmt {
         condition: Box<AstNode>,
         then_block: Vec<AstNode>,
         else_branch: Option<Box<AstNode>>,
@@ -89,7 +89,7 @@ pub enum AstNode {
         args: Vec<AstNode>,
     },
 
-    ForLoop {
+    ForLoopStmt {
         pattern: Pattern,
         iterable: Option<Box<AstNode>>,
         body: Vec<AstNode>, // keep Vec (block already returns Vec)
