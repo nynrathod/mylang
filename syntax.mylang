@@ -57,7 +57,7 @@ fn main() {
 	}
 
 	// statement
-	print("5")
+	print("5");
 
 	if x > 10 {
 	    print(">10")
