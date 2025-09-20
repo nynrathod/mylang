@@ -1,5 +1,5 @@
 pub mod analyzer;
-pub mod declaration;
+pub mod declarations;
 pub mod statements;
 pub mod types;
 
