@@ -194,6 +194,7 @@ fn main() {
 
     //     // Undeclared variable usage: 'i' is not declared
     //     // let j: String = i;
+    //      let z;
 
     //     // Correct declaration for control
     //     let k: Int = 42;
@@ -343,55 +344,107 @@ fn main() {
     //     // }
     //     "#;
 
+    // let input = r#"
+    //     let b = "s";
+    //     let mut a = "s";
+    //     // Valid cases
+    //     // fn GetValue() -> Int{ return 5; }
+    //     // a = GetValue();
+
+    //     // Multiple variables from function returning tuple
+    //     // a, b = GetUser(5);
+
+    //     // Multiple variables with wildcards
+    //     // a, _, c = GetUser(5);
+
+    //     // fn SomeFunction2(a: Int, b: Int) -> (Int, String) { return 5, "s"; }
+    //     // a, b = SomeFunction2(1, 2);
+
+    //     // fn SomeFunction(a: Int, b: Int) -> (Int, String) { return 5, "s"; }
+    //     // let mut a, _ = SomeFunction(1, 2);
+
+    //     // fn SomeFunction8(a: Int, b: Int) -> (Int, String, String) { return 5, "s", "sad"; }
+    //     // let  (a, (b, _)) = SomeFunction8(1, 2);
+
+    //     // invalid
+
+    //     // wrong function
+    //     // a, b = 42;
+    //     // a, b = "sdas";
+
+    //      // function not declared
+    //     // a, b = UnknownFunc(5);
+
+    //     // fn SomeFunction3(a: Int, b: Int) -> (Int, String) { return 5, "s"; }
+    //     // a = SomeFunction3(1, 2);
+
+    //     // fn SomeFunction4(a: Int, b: Int) -> (Int, String) { return 5, "s"; }
+    //     // a, b = SomeFunction4(1);
+
+    //     // fn SomeFunction6(a: Int, b: Int) -> (Int, String) { return 5, "s"; }
+    //     // a, b = SomeFunction6(1, "Sda");
+
+    //     // fn SomeFunction5(a: Int, b: Int) -> Int { return 5; }
+    //     // let d, c = SomeFunction5(1, 2);
+
+    //     // if, else = GetUser(5);
+    //     "#;
+
     let input = r#"
-        let b = "s";
-        let mut a = "s";
-        // Valid cases
-        // fn GetValue() -> Int{ return 5; }
-        // a = GetValue();
 
-        // Multiple variables from function returning tuple
-        // a, b = GetUser(5);
+        //Single values
+        // print(42);
 
-        // Multiple variables with wildcards
-        // a, _, c = GetUser(5);
+        // // print(true);
+        // print("Hello World");
+        // let x: Int = 10;
+        // print(x);
 
-        // fn SomeFunction2(a: Int, b: Int) -> (Int, String) { return 5, "s"; }
-        // a, b = SomeFunction2(1, 2);
+        // // Multiple items
+        // let y: Int = 30;
+        // print("x:", x, "y:", y);
+        // print(x + y, "sum:", x + y);
 
-        // fn SomeFunction(a: Int, b: Int) -> (Int, String) { return 5, "s"; }
-        // let mut a, _ = SomeFunction(1, 2);
+        // // Arrays / Lists
+        // let arr1 = [1, 2, 3];
+        // print(arr1);
+        // let arr2 = ["a", "b", "c"];
+        // print(arr2);
+        // print([x, y, x+y]);
 
-        // fn SomeFunction8(a: Int, b: Int) -> (Int, String, String) { return 5, "s", "sad"; }
-        // let  (a, (b, _)) = SomeFunction8(1, 2);
+        // // Maps / Dictionaries
+        // let m1 = { "a": 1, "b": 2 };
+        // print(m1);
+        // let m2 = { "num": x, "str": "hi" };
+        // print(m2);
+        // print({ "sum": x+y });
 
+        // // Nested structures
+        // print([[1,2],[3,4]]);
+        // print({ "nums": [1,2,3] });
+        // print({ "user": { "name": "Alice", "age": 25 } });
 
-
-        // invalid
-
-        // wrong function
-        // a, b = 42;
-        // a, b = "sdas";
-
-         // function not declared
-        // a, b = UnknownFunc(5);
-
-
-
-        // fn SomeFunction3(a: Int, b: Int) -> (Int, String) { return 5, "s"; }
-        // a = SomeFunction3(1, 2);
-
-        // fn SomeFunction4(a: Int, b: Int) -> (Int, String) { return 5, "s"; }
-        // a, b = SomeFunction4(1);
-
-        // fn SomeFunction6(a: Int, b: Int) -> (Int, String) { return 5, "s"; }
-        // a, b = SomeFunction6(1, "Sda");
-
-        // fn SomeFunction5(a: Int, b: Int) -> Int { return 5; }
-        // let d, c = SomeFunction5(1, 2);
+        // // Expressions directly
+        // print(x + y);
+        // print(x > y);
+        // print("result:", x + y);
 
 
-        // if, else = GetUser(5);
+
+
+
+
+        // Unsupported types
+        // let f: Int = fn() {};
+        // print(f);
+
+        // Incorrect usage
+        // print();
+        // print(x y);
+        // print("Hello" "World");
+        // print(x + );
+
+
         "#;
 
     // let input = fs::read_to_string("./syntax.mylang").unwrap();

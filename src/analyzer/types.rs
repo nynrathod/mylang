@@ -62,4 +62,12 @@ pub enum SemanticError {
     OperatorTypeMismatch(TypeMismatch),
     EmptyCollectionTypeInferenceError(TypeMismatch),
     InvalidConditionType(TypeMismatch),
+
+    // Print
+    InvalidPrintType {
+        found: TypeNode,
+    },
+    UnexpectedNode {
+        expected: String,
+    },
 }

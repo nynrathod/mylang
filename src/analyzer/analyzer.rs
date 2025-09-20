@@ -82,12 +82,11 @@ impl SemanticAnalyzer {
                 }
                 Ok(())
             }
-            AstNode::Print { exprs } => {
-                for expr in exprs {
-                    self.infer_type(expr)?;
-                }
-                Ok(())
+            AstNode::Print { .. } => {
+                // Delegate to the dedicated analyze_print method
+                self.analyze_print(node)
             }
+
             AstNode::Break | AstNode::Continue => Ok(()),
 
             // Expressions used as statements
@@ -353,6 +352,22 @@ impl SemanticAnalyzer {
                         }
                         Ok(TypeNode::Bool)
                     }
+
+                    // Arithmetic operators
+                    TokenType::Plus
+                    | TokenType::Minus
+                    | TokenType::Star
+                    | TokenType::Slash
+                    | TokenType::Percent => match (left_type.clone(), right_type.clone()) {
+                        (TypeNode::Int, TypeNode::Int) => Ok(TypeNode::Int),
+                        (TypeNode::Float, TypeNode::Float) => Ok(TypeNode::Float),
+                        _ => {
+                            return Err(SemanticError::OperatorTypeMismatch(TypeMismatch {
+                                expected: left_type,
+                                found: right_type,
+                            }));
+                        }
+                    },
 
                     _ => unimplemented!("Operator {:?} not handled", op),
                 }
