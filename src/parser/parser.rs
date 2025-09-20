@@ -90,7 +90,7 @@ impl<'a> Parser<'a> {
                 TokenType::Continue => self.parse_continue(),
                 TokenType::Function => self.parse_functional_decl(),
                 TokenType::For => self.parse_for_stmt(),
-                TokenType::Identifier | TokenType::Underscore | TokenType::OpenParen => {
+                TokenType::Identifier | TokenType::Underscore => {
                     // Try assignment first
                     if let Ok(assign) = self.parse_assignment() {
                         return Ok(assign);

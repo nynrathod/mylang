@@ -170,6 +170,8 @@ impl<'a> Parser<'a> {
     pub fn parse_pattern(&mut self) -> ParseResult<Pattern> {
         if let Some(tok) = self.peek() {
             match tok.kind {
+                // Open-Close Paren Checking => for Some(x,y) {}
+                // Else checking _, a = GetUser();
                 TokenType::Identifier | TokenType::Some => {
                     let name = tok.value.to_string();
                     self.advance();
