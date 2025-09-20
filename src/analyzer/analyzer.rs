@@ -1,25 +1,24 @@
+use crate::analyzer::types::{SemanticError, TypeMismatch};
+use crate::lexar::token::TokenType;
 use crate::parser::ast::{AstNode, TypeNode};
 use std::collections::HashMap;
 
-#[derive(Debug)]
-pub enum SemanticError {
-    TypeMismatch { expected: TypeNode, found: TypeNode },
-    Redeclaration { name: String },
-    UndeclaredVariable { name: String },
-    InvalidConditionType { found: TypeNode },
-}
-
 pub struct SemanticAnalyzer {
-    symbol_table: HashMap<String, (TypeNode, bool)>,
+    pub(crate) symbol_table: HashMap<String, (TypeNode, bool)>, // current scope variables
+    pub(crate) function_table: HashMap<String, TypeNode>,
+    pub(crate) outer_symbol_table: Option<HashMap<String, (TypeNode, bool)>>,
 }
 
 impl SemanticAnalyzer {
     pub fn new() -> Self {
         Self {
             symbol_table: HashMap::new(),
+            function_table: HashMap::new(),
+            outer_symbol_table: None,
         }
     }
 
+    /// Analyze a list of AST nodes (program and block)
     pub fn analyze_program(&mut self, nodes: &mut Vec<AstNode>) -> Result<(), SemanticError> {
         for node in nodes {
             self.analyze_node(node)?;
@@ -27,7 +26,38 @@ impl SemanticAnalyzer {
         Ok(())
     }
 
-    fn analyze_node(&mut self, node: &mut AstNode) -> Result<(), SemanticError> {
+    /// Check if any node contains a return statement
+    pub fn has_return_statement(&self, nodes: &Vec<AstNode>) -> bool {
+        for node in nodes {
+            match node {
+                AstNode::Return { .. } => return true,
+                AstNode::ConditionalStmt {
+                    then_block,
+                    else_branch,
+                    ..
+                } => {
+                    let then_has = self.has_return_statement(then_block);
+                    let else_has = else_branch
+                        .as_ref()
+                        .map(|b| self.has_return_statement(&vec![*b.clone()]))
+                        .unwrap_or(false);
+                    if then_has && else_has {
+                        return true;
+                    }
+                }
+                AstNode::Block(inner_nodes) => {
+                    if self.has_return_statement(inner_nodes) {
+                        return true;
+                    }
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+
+    /// Dispatch analysis based on AST node type
+    pub fn analyze_node(&mut self, node: &mut AstNode) -> Result<(), SemanticError> {
         match node {
             AstNode::LetDecl { .. } => self.analyze_let_decl(node),
             AstNode::Block(nodes) => self.analyze_program(nodes),
@@ -36,130 +66,165 @@ impl SemanticAnalyzer {
                 then_block,
                 else_branch,
             } => self.analyze_conditional_stmt(condition, then_block, else_branch),
-
-            // later: Assignment, FunctionDecl, ForLoopStmt, etc.
-            _ => Ok(()),
-        }
-    }
-
-    fn analyze_conditional_stmt(
-        &mut self,
-        condition: &mut AstNode,
-        then_block: &mut Vec<AstNode>,
-        else_branch: &mut Option<Box<AstNode>>,
-    ) -> Result<(), SemanticError> {
-        let cond_type = self.infer_type(condition)?;
-        if cond_type != TypeNode::Bool {
-            return Err(SemanticError::TypeMismatch {
-                expected: TypeNode::Bool,
-                found: cond_type,
-            });
-        }
-
-        self.analyze_program(then_block)?;
-
-        if let Some(else_node) = else_branch {
-            self.analyze_node(else_node)?;
-        }
-
-        Ok(())
-    }
-
-    fn analyze_let_decl(&mut self, node: &mut AstNode) -> Result<(), SemanticError> {
-        if let AstNode::LetDecl {
-            mutable,
-            type_annotation,
-            name,
-            value,
-        } = node
-        {
-            // 1️⃣ Check redeclaration
-            if self.symbol_table.contains_key(name) {
-                return Err(SemanticError::Redeclaration { name: name.clone() });
-            }
-
-            // 2️⃣ Determine type
-            let inferred_type = if let Some(annotated_type) = type_annotation.as_ref() {
-                // println!("User defined type for '{}': {:?}", name, annotated_type);
-                // Validate RHS matches annotation
-                let rhs_type = self.infer_type(value)?;
-                if rhs_type != *annotated_type {
-                    return Err(SemanticError::TypeMismatch {
-                        expected: annotated_type.clone(),
-                        found: rhs_type,
-                    });
+            AstNode::FunctionDecl {
+                name,
+                visibility,
+                params,
+                return_type,
+                body,
+            } => self.analyze_functional_decl(name, visibility, params, return_type, body),
+            AstNode::Return { values } => {
+                for v in values {
+                    self.infer_type(v)?; // check return value types
                 }
-                annotated_type.clone()
-            } else {
-                // Infer type from value
-                self.infer_type(value)?
-            };
+                Ok(())
+            }
+            AstNode::Print { exprs } => {
+                for expr in exprs {
+                    self.infer_type(expr)?;
+                }
+                Ok(())
+            }
+            AstNode::Break | AstNode::Continue => Ok(()),
 
-            // 3️⃣ Append type if missing
-            *type_annotation = Some(inferred_type.clone()); // ✅ assign directly
-
-            // 4️⃣ Insert into symbol table
-            self.symbol_table
-                .insert(name.clone(), (inferred_type, *mutable));
-
-            println!("Symbol table: {:#?}", self.symbol_table);
+            // Expressions used as statements
+            _ => {
+                // Catch-all for any AST nodes not explicitly handled above.
+                // We call `infer_type` to:
+                // Validate that all identifiers exist in scope.
+                // Ensure expressions (literals, binary/unary ops, function calls) are type-correct.
+                // Future-proof: new AST node types will still be semantically validated.
+                self.infer_type(node)?;
+                Ok(())
+            }
         }
-        Ok(())
     }
 
-    fn infer_type(&self, node: &AstNode) -> Result<TypeNode, SemanticError> {
+    /// Infer the type of a given AST node
+    pub fn infer_type(&self, node: &AstNode) -> Result<TypeNode, SemanticError> {
         match node {
             AstNode::NumberLiteral(_) => Ok(TypeNode::Int),
             AstNode::StringLiteral(_) => Ok(TypeNode::String),
             AstNode::BoolLiteral(_) => Ok(TypeNode::Bool),
-            AstNode::ArrayLiteral(elements) => {
-                if elements.is_empty() {
-                    return Err(SemanticError::TypeMismatch {
-                        expected: TypeNode::Array(Box::new(TypeNode::Int)),
-                        found: TypeNode::Array(Box::new(TypeNode::Int)),
-                    }); // placeholder
-                }
-                let first_type = self.infer_type(&elements[0])?;
-                // TODO: check rest elements match first_type
-                Ok(TypeNode::Array(Box::new(first_type)))
-            }
-            AstNode::MapLiteral(pairs) => {
-                if pairs.is_empty() {
-                    return Err(SemanticError::TypeMismatch {
-                        expected: TypeNode::Map(
-                            Box::new(TypeNode::String),
-                            Box::new(TypeNode::Int),
-                        ),
-                        found: TypeNode::Map(Box::new(TypeNode::String), Box::new(TypeNode::Int)),
-                    }); // placeholder
-                }
-                let key_type = self.infer_type(&pairs[0].0)?;
-                let value_type = self.infer_type(&pairs[0].1)?;
-                // TODO: check rest pairs match key/value type
-                Ok(TypeNode::Map(Box::new(key_type), Box::new(value_type)))
-            }
+
             AstNode::Identifier(name) => {
                 if let Some((t, _)) = self.symbol_table.get(name) {
                     Ok(t.clone())
+                } else if let Some(outer) = &self.outer_symbol_table {
+                    // If variable defined out of function
+                    if let Some((_t, _)) = outer.get(name) {
+                        return Err(SemanticError::OutOfScopeVariable { name: name.clone() });
+                    }
+                    // If not found variable declaration
+                    else {
+                        return Err(SemanticError::UndeclaredVariable { name: name.clone() });
+                    }
                 } else {
-                    // Variable used before declaration
-                    return Err(SemanticError::UndeclaredVariable { name: name.clone() });
+                    Err(SemanticError::UndeclaredVariable { name: name.clone() })
                 }
             }
 
-            AstNode::BinaryExpr { left, op: _, right } => {
+            AstNode::BinaryExpr { left, op, right } => {
                 let left_type = self.infer_type(left)?;
                 let right_type = self.infer_type(right)?;
-                if left_type != right_type {
-                    return Err(SemanticError::TypeMismatch {
-                        expected: left_type,
-                        found: right_type,
-                    });
+
+                match op {
+                    // Comparison operators
+                    TokenType::EqEq
+                    | TokenType::EqEqEq
+                    | TokenType::NotEq
+                    | TokenType::NotEqEq
+                    | TokenType::Gt
+                    | TokenType::Lt
+                    | TokenType::GtEq
+                    | TokenType::LtEq => {
+                        if left_type != right_type {
+                            return Err(SemanticError::OperatorTypeMismatch(TypeMismatch {
+                                expected: left_type,
+                                found: right_type,
+                            }));
+                        }
+                        Ok(TypeNode::Bool)
+                    }
+
+                    // Logical gates
+                    TokenType::AndAnd | TokenType::OrOr => {
+                        if left_type != TypeNode::Bool || right_type != TypeNode::Bool {
+                            return Err(SemanticError::OperatorTypeMismatch(TypeMismatch {
+                                expected: TypeNode::Bool,
+                                found: if left_type != TypeNode::Bool {
+                                    left_type
+                                } else {
+                                    right_type
+                                },
+                            }));
+                        }
+                        Ok(TypeNode::Bool)
+                    }
+
+                    _ => unimplemented!("Operator {:?} not handled", op),
                 }
-                Ok(left_type) // result type same as operands
             }
-            AstNode::UnaryExpr { op: _, expr } => self.infer_type(expr),
-            _ => unimplemented!(),
+
+            AstNode::UnaryExpr { expr, .. } => self.infer_type(expr),
+
+            AstNode::FunctionCall { func, args } => {
+                let name = if let AstNode::Identifier(name) = &**func {
+                    name
+                } else {
+                    return Err(SemanticError::UndeclaredVariable {
+                        name: format!("{:?}", func),
+                    });
+                };
+                if let Some(ret_ty) = self.function_table.get(name) {
+                    Ok(ret_ty.clone())
+                } else {
+                    Err(SemanticError::UndeclaredVariable { name: name.clone() })
+                }
+            }
+
+            AstNode::ArrayLiteral(elements) => {
+                if elements.is_empty() {
+                    return Err(SemanticError::EmptyCollectionTypeInferenceError(
+                        TypeMismatch {
+                            expected: TypeNode::Array(Box::new(TypeNode::Int)),
+                            found: TypeNode::Array(Box::new(TypeNode::Int)),
+                        },
+                    ));
+                }
+
+                // Use the first element to infer array types,
+                // mixing [1, "2", "hello"]; not supported
+                let first_type = self.infer_type(&elements[0])?;
+                Ok(TypeNode::Array(Box::new(first_type)))
+            }
+
+            AstNode::MapLiteral(pairs) => {
+                if pairs.is_empty() {
+                    return Err(SemanticError::EmptyCollectionTypeInferenceError(
+                        TypeMismatch {
+                            expected: TypeNode::Map(
+                                Box::new(TypeNode::String),
+                                Box::new(TypeNode::Int),
+                            ),
+                            found: TypeNode::Map(
+                                Box::new(TypeNode::String),
+                                Box::new(TypeNode::Int),
+                            ),
+                        },
+                    ));
+                }
+                // Use the first key-value pair to infer map types
+                // mixing (e.g., { "a": 1, 2: "b" }) is NOT supported
+                let key_type = self.infer_type(&pairs[0].0)?;
+                let value_type = self.infer_type(&pairs[0].1)?;
+                Ok(TypeNode::Map(Box::new(key_type), Box::new(value_type)))
+            }
+
+            _ => {
+                // For statements, return Void; actual checking happens in analyze_node
+                Ok(TypeNode::Void)
+            }
         }
     }
 }

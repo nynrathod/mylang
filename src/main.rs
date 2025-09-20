@@ -203,83 +203,148 @@ fn main() {
     //     let o: Map<String, Int> = {"a": 1, "b": 2};
     // "#;
 
+    // let input = r#"
+    //     //  Valid condition type
+    //     // let a: Bool = true;
+    //     // if a {
+    //     //     let x: Int = 10;
+    //     // } else {
+    //     //     let y: String = "ok";
+    //     // }
+
+    //     //  Invalid condition type (Int instead of Bool)
+    //     // let b: Int = 5;
+    //     // if b {
+    //     //     let wrong: Int = 99;
+    //     // }
+
+    //     // Undeclared variable in condition
+    //     // if undeclared {
+    //     //     let c: Int = 1;
+    //     // }
+
+    //     //  Undeclared variable in then block
+    //     // let d: Bool = true;
+    //     // if d {
+    //     //     let e: Int = unknownvar;
+    //     // }
+
+    //     //  Undeclared variable in else block
+    //     // let f: Bool = true;
+    //     // if f {
+    //     //     let g: Int = 1;
+    //     // } else {
+    //     //     let h: String = missing;
+    //     // }
+
+    //     //  Type mismatch inside blocks
+    //     // let i: Bool = true;
+    //     // if i {
+    //     //     let j: Int = "oops";     // mismatch
+    //     // } else {
+    //     //     let k: String = 42;      // mismatch
+    //     // }
+
+    //     //  Nested if inside then
+    //     // let l: Bool = true;
+    //     // let m: Bool = false;
+    //     // if l {
+    //     //     if m {
+    //     //         let n: Int = 123;
+    //     //     }
+    //     // }
+
+    //     //  Nested if with invalid condition
+    //     // let o: Bool = true;
+    //     // let p: Int = 42;
+    //     // if o {
+    //     //     if p {
+    //     //         let q: Int = 99;
+    //     //     }
+    //     // }
+
+    //     //  If without else
+    //     // let r: Bool = true;
+    //     // if r {
+    //     //     let msg: String = "hello";
+    //     // }
+
+    //     // If-else chain
+    //     // let s: Bool = true;
+    //     // let t: Bool = false;
+    //     // if s {
+    //     //     let u: Int = 10;
+    //     // } else if t {
+    //     //     let v: Int = 20;
+    //     // } else {
+    //     //     let w: Int = 30;
+    //     // }
+    // "#;
+
     let input = r#"
-        //  Valid condition type
-        // let a: Bool = true;
-        // if a {
-        //     let x: Int = 10;
-        // } else {
-        //     let y: String = "ok";
+
+        // let a = 5;
+        // let a = 5;
+        // if a == 5 {
+
+        // }
+        // fn Foo() {}
+
+        // fn Foo1(a: Int) {}
+        // fn Foo2(a: Int, b: String) -> (Int, String) { return a, "sfsd"; }
+
+        // fn Bar1(a: String) -> String { return a; }
+        // fn Bar2(a: Int, b: Int) -> Int { return a + b; }
+        // fn Baz1(a: Array<Int>) -> Array<Int> { return a; }
+        // fn Baz2(a: Map<String, Int>) -> Map<String, Int> { return a; }
+
+        // fn Cond() -> Int {
+        //     if true { return 1; }
+        //     else { return 2; }
         // }
 
-        //  Invalid condition type (Int instead of Bool)
-        // let b: Int = 5;
-        // if b {
-        //     let wrong: Int = 99;
+        // fn ScopeTest() {
+        //     let y: Int = 5;
+        //     print(y);
+        // }
+        // fn Shadow(a: Int) {
+        //     let b: Int = 99;
         // }
 
-        // Undeclared variable in condition
-        // if undeclared {
-        //     let c: Int = 1;
+        // fn Overload1(a: Int) -> Int { return a; }
+        // fn Overload2(a: String) -> String { return a; }
+
+        // fn Rec(x: Int) -> Int { return Rec(x - 1); }
+
+
+
+        //  Return type mismatch
+        // fn foo() {
+        //     return 42;
+        // }
+        // fn WrongReturn2() -> Int { return "hi"; }
+        // fn WrongReturn3() { return 5; }
+        // fn WrongReturn4() -> Int {
+        //     if true { return 1; }
+        //     else { return "oops"; }
         // }
 
-        //  Undeclared variable in then block
-        // let d: Bool = true;
-        // if d {
-        //     let e: Int = unknownvar;
-        // }
+        //  Function redeclaration conflict
+        // fn Dup(a: Int) -> Int { return a; }
+        // fn Dup(a: Int) -> String { return a; }
 
-        //  Undeclared variable in else block
-        // let f: Bool = true;
-        // if f {
-        //     let g: Int = 1;
-        // } else {
-        //     let h: String = missing;
-        // }
+        // Duplicate parameter names
+        // fn DupParam(a: Int, a: Int) {}
 
-        //  Type mismatch inside blocks
-        // let i: Bool = true;
-        // if i {
-        //     let j: Int = "oops";     // mismatch
-        // } else {
-        //     let k: String = 42;      // mismatch
-        // }
 
-        //  Nested if inside then
-        // let l: Bool = true;
-        // let m: Bool = false;
-        // if l {
-        //     if m {
-        //         let n: Int = 123;
-        //     }
-        // }
+        // To implement later
+        // let outer: Int = 10;
+        // fn ShadowOuter() -> Int { return outer; } // outer not in function scope
 
-        //  Nested if with invalid condition
-        // let o: Bool = true;
-        // let p: Int = 42;
-        // if o {
-        //     if p {
-        //         let q: Int = 99;
-        //     }
+        // fn UseUndeclared() {
+        //     print(z);  // z not declared
         // }
-
-        //  If without else
-        // let r: Bool = true;
-        // if r {
-        //     let msg: String = "hello";
-        // }
-
-        // If-else chain
-        // let s: Bool = true;
-        // let t: Bool = false;
-        // if s {
-        //     let u: Int = 10;
-        // } else if t {
-        //     let v: Int = 20;
-        // } else {
-        //     let w: Int = 30;
-        // }
-    "#;
+        "#;
 
     // let input = fs::read_to_string("./syntax.mylang").unwrap();
     // println!("Source code:\n{}", input);
