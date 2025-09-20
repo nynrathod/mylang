@@ -172,7 +172,8 @@ impl<'a> Parser<'a> {
             if tok.kind == TokenType::Arrow {
                 // e.g., '->'
                 self.advance();
-                return_type = Some(self.parse_type_annotation()?); // or parse multiple types if you want
+                return_type = Some(self.parse_return_type()?);
+                // or parse multiple types if you want
             }
         }
 
@@ -185,6 +186,50 @@ impl<'a> Parser<'a> {
             return_type,
             body: body_block,
         })
+    }
+
+    pub(crate) fn parse_return_type(&mut self) -> ParseResult<TypeNode> {
+        if let Some(tok) = self.peek() {
+            // Idenntify multiple return type while function declare
+            // Ex., fn Foo(a: Int, b: String) -> (String, String) {}
+            if tok.kind == TokenType::OpenParen {
+                // multiple return types
+                self.advance(); // consume '('
+                let mut types = Vec::new();
+                loop {
+                    types.push(self.parse_type_annotation()?);
+
+                    if let Some(tok) = self.peek() {
+                        match tok.kind {
+                            TokenType::Comma => {
+                                self.advance();
+                            }
+
+                            TokenType::CloseParen => {
+                                self.advance(); // consume ')'
+                                break;
+                            }
+                            _ => {
+                                return Err(ParseError::UnexpectedToken(format!(
+                                    "Expected ',' or ')', got {:?}",
+                                    tok.kind
+                                )));
+                            }
+                        }
+                    } else {
+                        return Err(ParseError::UnexpectedToken(
+                            "Unexpected end of input in return type tuple".into(),
+                        ));
+                    }
+                }
+                Ok(TypeNode::Tuple(types))
+            } else {
+                // single return type
+                self.parse_type_annotation()
+            }
+        } else {
+            Err(ParseError::EndOfInput)
+        }
     }
 
     pub(crate) fn parse_type_annotation(&mut self) -> ParseResult<TypeNode> {

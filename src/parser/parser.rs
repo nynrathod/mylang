@@ -55,6 +55,7 @@ impl<'a> Parser<'a> {
             None => Err(ParseError::EndOfInput),
         }
     }
+
     fn parse_return(&mut self) -> ParseResult<AstNode> {
         self.expect(TokenType::Return)?; // consume 'return'
 

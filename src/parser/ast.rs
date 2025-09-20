@@ -9,6 +9,8 @@ pub enum TypeNode {
     Bool,
     Array(Box<TypeNode>),              // Array<Int>, Array<String>
     Map(Box<TypeNode>, Box<TypeNode>), // Map<String, Int>
+    Tuple(Vec<TypeNode>),
+    Void,
 }
 
 #[derive(Debug, Clone)]
