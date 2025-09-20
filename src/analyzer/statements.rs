@@ -1,7 +1,7 @@
 use super::analyzer::SemanticAnalyzer;
 use std::collections::HashMap;
 
-use super::types::{SemanticError, TypeMismatch};
+use super::types::{NamedError, SemanticError, TypeMismatch};
 use crate::parser::ast::{AstNode, TypeNode};
 
 impl SemanticAnalyzer {
@@ -39,23 +39,24 @@ impl SemanticAnalyzer {
     ) -> Result<(), SemanticError> {
         // If function already defined
         if self.function_table.contains_key(name) {
-            return Err(SemanticError::FunctionRedeclaration {
+            return Err(SemanticError::FunctionRedeclaration(NamedError {
                 name: name.to_string(),
-            });
+            }));
         }
+        let param_types: Vec<TypeNode> = params.iter().map(|(_, t)| t.clone().unwrap()).collect();
 
         self.function_table.insert(
             name.to_string(),
-            return_type.clone().unwrap_or(TypeNode::Void),
+            (param_types, return_type.clone().unwrap_or(TypeNode::Void)),
         );
 
         // Is public or private function
         if visibility == "Public" {
             if let Some(first_char) = name.chars().next() {
                 if !first_char.is_uppercase() {
-                    return Err(SemanticError::InvalidPublicName {
+                    return Err(SemanticError::InvalidPublicName(NamedError {
                         name: name.to_string(),
-                    });
+                    }));
                 }
             }
         }
@@ -65,18 +66,17 @@ impl SemanticAnalyzer {
 
         for (param_name, param_type) in params.iter() {
             // Type is mandator if parameter passed. Check type exists
-            let param_type =
-                param_type
-                    .as_ref()
-                    .ok_or_else(|| SemanticError::MissingParamType {
-                        name: param_name.clone(),
-                    })?;
+            let param_type = param_type.as_ref().ok_or_else(|| {
+                SemanticError::MissingParamType(NamedError {
+                    name: param_name.clone(),
+                })
+            })?;
 
             // Check duplicate param names
             if local_scope.contains_key(param_name) {
-                return Err(SemanticError::FunctionParamRedeclaration {
+                return Err(SemanticError::FunctionParamRedeclaration(NamedError {
                     name: param_name.clone(),
-                });
+                }));
             }
 
             // Insert parameter into local scope (immutable)
@@ -254,19 +254,13 @@ impl SemanticAnalyzer {
         if let AstNode::LetDecl {
             mutable,
             type_annotation,
-            name,
+            pattern,
             value,
         } = node
         {
-            // Check redeclaration of variable
-            if self.symbol_table.contains_key(name) {
-                return Err(SemanticError::VariableRedeclaration { name: name.clone() });
-            }
-
-            // Check type
-            let inferred_type = if let Some(annotated_type) = type_annotation.as_ref() {
-                // println!("User defined type for '{}': {:?}", name, annotated_type);
-                // Validate RHS matches annotation
+            // Determine the type of the RHS (value being assigned)
+            let rhs_type = if let Some(annotated_type) = type_annotation.as_ref() {
+                // If the variable has a type annotation, check that RHS matches it
                 let rhs_type = self.infer_type(value)?;
                 if rhs_type != *annotated_type {
                     return Err(SemanticError::VarTypeMismatch(TypeMismatch {
@@ -276,19 +270,59 @@ impl SemanticAnalyzer {
                 }
                 annotated_type.clone()
             } else {
-                // Infer type from value
+                // No annotation: infer type from the value
                 self.infer_type(value)?
             };
 
-            // Append type if missing
-            // This ensure static type
-            *type_annotation = Some(inferred_type.clone());
+            // Update the type annotation to reflect the inferred type if it was missing
+            *type_annotation = Some(rhs_type.clone());
 
-            // Insert into symbol table
-            self.symbol_table
-                .insert(name.clone(), (inferred_type, *mutable));
+            // Flatten the LHS pattern
+            let mut targets = Vec::new();
+            Self::flatten_pattern(pattern, &mut targets);
 
-            // println!("Symbol table: {:#?}", self.symbol_table);
+            // If RHS is a tuple, each element must match a pattern
+            // Otherwise, treat RHS as a single-element list
+            let rhs_types = match &rhs_type {
+                TypeNode::Tuple(types) => types.clone(),
+                t => vec![t.clone()],
+            };
+
+            // Check that the number of LHS patterns matches the number of RHS types
+            if rhs_types.len() != targets.len() {
+                return Err(SemanticError::TupleAssignmentMismatch {
+                    expected: rhs_types.len(),
+                    found: targets.len(),
+                });
+            }
+
+            // Bind each pattern to its type in the symbol table
+            for (target, ty) in targets.iter().zip(rhs_types.iter()) {
+                match target {
+                    // Identifier: add to symbol table, mark mutability
+                    crate::parser::ast::Pattern::Identifier(name) => {
+                        // Prevent redeclaration
+                        if self.symbol_table.contains_key(name) {
+                            return Err(SemanticError::VariableRedeclaration(NamedError {
+                                name: name.clone(),
+                            }));
+                        }
+                        // Skip wildcards
+                        if name != "_" {
+                            self.symbol_table
+                                .insert(name.clone(), (ty.clone(), *mutable));
+                        }
+                    }
+                    // Wildcard: allowed but not stored
+                    crate::parser::ast::Pattern::Wildcard => {}
+                    // Anything else: invalid pattern
+                    _ => {
+                        return Err(SemanticError::InvalidAssignmentTarget {
+                            target: format!("{:?}", target),
+                        });
+                    }
+                }
+            }
         }
         Ok(())
     }

@@ -281,69 +281,117 @@ fn main() {
     //     // }
     // "#;
 
+    // let input = r#"
+
+    //     // let a = 5;
+    //     // let a = 5;
+    //     // if a == 5 {
+
+    //     // }
+    //     // fn Foo() {}
+
+    //     // fn Foo1(a: Int) {}
+    //     // fn Foo2(a: Int, b: String) -> (Int, String) { return a, "sfsd"; }
+
+    //     // fn Bar1(a: String) -> String { return a; }
+    //     // fn Bar2(a: Int, b: Int) -> Int { return a + b; }
+    //     // fn Baz1(a: Array<Int>) -> Array<Int> { return a; }
+    //     // fn Baz2(a: Map<String, Int>) -> Map<String, Int> { return a; }
+
+    //     // fn Cond() -> Int {
+    //     //     if true { return 1; }
+    //     //     else { return 2; }
+    //     // }
+
+    //     // fn ScopeTest() {
+    //     //     let y: Int = 5;
+    //     //     print(y);
+    //     // }
+    //     // fn Shadow(a: Int) {
+    //     //     let b: Int = 99;
+    //     // }
+
+    //     // fn Overload1(a: Int) -> Int { return a; }
+    //     // fn Overload2(a: String) -> String { return a; }
+
+    //     // fn Rec(x: Int) -> Int { return Rec(x - 1); }
+
+    //     //  Return type mismatch
+    //     // fn foo() {
+    //     //     return 42;
+    //     // }
+    //     // fn WrongReturn2() -> Int { return "hi"; }
+    //     // fn WrongReturn3() { return 5; }
+    //     // fn WrongReturn4() -> Int {
+    //     //     if true { return 1; }
+    //     //     else { return "oops"; }
+    //     // }
+
+    //     //  Function redeclaration conflict
+    //     // fn Dup(a: Int) -> Int { return a; }
+    //     // fn Dup(a: Int) -> String { return a; }
+
+    //     // Duplicate parameter names
+    //     // fn DupParam(a: Int, a: Int) {}
+
+    //     // To implement later
+    //     // let outer: Int = 10;
+    //     // fn ShadowOuter() -> Int { return outer; } // outer not in function scope
+
+    //     // fn UseUndeclared() {
+    //     //     print(z);  // z not declared
+    //     // }
+    //     "#;
+
     let input = r#"
+        let b = "s";
+        let mut a = "s";
+        // Valid cases
+        // fn GetValue() -> Int{ return 5; }
+        // a = GetValue();
 
-        // let a = 5;
-        // let a = 5;
-        // if a == 5 {
+        // Multiple variables from function returning tuple
+        // a, b = GetUser(5);
 
-        // }
-        // fn Foo() {}
+        // Multiple variables with wildcards
+        // a, _, c = GetUser(5);
 
-        // fn Foo1(a: Int) {}
-        // fn Foo2(a: Int, b: String) -> (Int, String) { return a, "sfsd"; }
+        // fn SomeFunction2(a: Int, b: Int) -> (Int, String) { return 5, "s"; }
+        // a, b = SomeFunction2(1, 2);
 
-        // fn Bar1(a: String) -> String { return a; }
-        // fn Bar2(a: Int, b: Int) -> Int { return a + b; }
-        // fn Baz1(a: Array<Int>) -> Array<Int> { return a; }
-        // fn Baz2(a: Map<String, Int>) -> Map<String, Int> { return a; }
+        // fn SomeFunction(a: Int, b: Int) -> (Int, String) { return 5, "s"; }
+        // let mut a, _ = SomeFunction(1, 2);
 
-        // fn Cond() -> Int {
-        //     if true { return 1; }
-        //     else { return 2; }
-        // }
-
-        // fn ScopeTest() {
-        //     let y: Int = 5;
-        //     print(y);
-        // }
-        // fn Shadow(a: Int) {
-        //     let b: Int = 99;
-        // }
-
-        // fn Overload1(a: Int) -> Int { return a; }
-        // fn Overload2(a: String) -> String { return a; }
-
-        // fn Rec(x: Int) -> Int { return Rec(x - 1); }
+        // fn SomeFunction8(a: Int, b: Int) -> (Int, String, String) { return 5, "s", "sad"; }
+        // let  (a, (b, _)) = SomeFunction8(1, 2);
 
 
 
-        //  Return type mismatch
-        // fn foo() {
-        //     return 42;
-        // }
-        // fn WrongReturn2() -> Int { return "hi"; }
-        // fn WrongReturn3() { return 5; }
-        // fn WrongReturn4() -> Int {
-        //     if true { return 1; }
-        //     else { return "oops"; }
-        // }
+        // invalid
 
-        //  Function redeclaration conflict
-        // fn Dup(a: Int) -> Int { return a; }
-        // fn Dup(a: Int) -> String { return a; }
+        // wrong function
+        // a, b = 42;
+        // a, b = "sdas";
 
-        // Duplicate parameter names
-        // fn DupParam(a: Int, a: Int) {}
+         // function not declared
+        // a, b = UnknownFunc(5);
 
 
-        // To implement later
-        // let outer: Int = 10;
-        // fn ShadowOuter() -> Int { return outer; } // outer not in function scope
 
-        // fn UseUndeclared() {
-        //     print(z);  // z not declared
-        // }
+        // fn SomeFunction3(a: Int, b: Int) -> (Int, String) { return 5, "s"; }
+        // a = SomeFunction3(1, 2);
+
+        // fn SomeFunction4(a: Int, b: Int) -> (Int, String) { return 5, "s"; }
+        // a, b = SomeFunction4(1);
+
+        // fn SomeFunction6(a: Int, b: Int) -> (Int, String) { return 5, "s"; }
+        // a, b = SomeFunction6(1, "Sda");
+
+        // fn SomeFunction5(a: Int, b: Int) -> Int { return 5; }
+        // let d, c = SomeFunction5(1, 2);
+
+
+        // if, else = GetUser(5);
         "#;
 
     // let input = fs::read_to_string("./syntax.mylang").unwrap();

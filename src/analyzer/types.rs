@@ -9,32 +9,42 @@ pub struct TypeMismatch {
 }
 
 #[derive(Debug)]
+pub struct NamedError {
+    pub name: String,
+}
+
+#[derive(Debug)]
 pub enum SemanticError {
-    VariableRedeclaration {
-        name: String,
-    },
-    UndeclaredVariable {
-        name: String,
-    },
+    // Variable Declaration/Assignment Errors
+    VariableRedeclaration(NamedError),
+    UndeclaredVariable(NamedError),
     VarTypeMismatch(TypeMismatch),
-    OperatorTypeMismatch(TypeMismatch),
-    EmptyCollectionTypeInferenceError(TypeMismatch),
-    ReturnTypeMismatch {
-        function: String,
-        mismatch: TypeMismatch,
+    TupleAssignmentMismatch {
+        expected: usize,
+        found: usize,
     },
-    InvalidConditionType(TypeMismatch),
-    InvalidPublicName {
-        name: String,
+    InvalidAssignmentTarget {
+        target: String,
     },
-    FunctionParamRedeclaration {
-        name: String,
+    OutOfScopeVariable(NamedError),
+
+    // Function Declaration/Call Errors
+    FunctionRedeclaration(NamedError),
+    FunctionParamRedeclaration(NamedError),
+    MissingParamType(NamedError),
+    UndeclaredFunction(NamedError),
+    InvalidFunctionCall {
+        func: String,
     },
-    FunctionRedeclaration {
+    FunctionArgumentMismatch {
         name: String,
+        expected: usize,
+        found: usize,
     },
-    MissingParamType {
+    FunctionArgumentTypeMismatch {
         name: String,
+        expected: TypeNode,
+        found: TypeNode,
     },
     MissingFunctionReturn {
         function: String,
@@ -42,7 +52,14 @@ pub enum SemanticError {
     InvalidReturnInVoidFunction {
         function: String,
     },
-    OutOfScopeVariable {
-        name: String,
+    ReturnTypeMismatch {
+        function: String,
+        mismatch: TypeMismatch,
     },
+    InvalidPublicName(NamedError),
+
+    // Type/Operator Errors
+    OperatorTypeMismatch(TypeMismatch),
+    EmptyCollectionTypeInferenceError(TypeMismatch),
+    InvalidConditionType(TypeMismatch),
 }
