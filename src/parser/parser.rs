@@ -80,7 +80,7 @@ impl<'a> Parser<'a> {
     pub fn parse_statement(&mut self) -> ParseResult<AstNode> {
         match self.peek() {
             Some(tok) => match tok.kind {
-                TokenType::Let | TokenType::Var => self.parse_var_decl(),
+                TokenType::Let => self.parse_let_decl(),
                 TokenType::Struct => self.parse_struct_decl(),
                 TokenType::Enum => self.parse_enum_decl(),
                 TokenType::If => self.parse_conditional_stmt(),

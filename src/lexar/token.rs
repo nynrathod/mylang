@@ -1,8 +1,8 @@
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TokenType {
     // --- Keywords ---
-    Let,      // let (immutable)
-    Var,      // var (mutable)
+    Let,      // let
+    Mut,      // mutable keyword for let
     Function, // function
     Import,   // import
     Struct,   // struct

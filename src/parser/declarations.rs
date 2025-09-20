@@ -1,5 +1,5 @@
 use crate::lexar::token::TokenType;
-use crate::parser::ast::{AstNode, TypeNode};
+use crate::parser::ast::{AstNode, Pattern, TypeNode};
 use crate::parser::{ParseError, ParseResult, Parser};
 
 impl<'a> Parser<'a> {
@@ -85,16 +85,48 @@ impl<'a> Parser<'a> {
         })
     }
 
-    pub fn parse_var_decl(&mut self) -> ParseResult<AstNode> {
+    pub fn parse_let_pattern(&mut self) -> ParseResult<Pattern> {
+        let mut patterns = Vec::new();
+
+        // Parse a `let` pattern, which can be a single identifier or a tuple of identifiers.
+        // - `x` → single identifier
+        // - `x, y, z` → tuple pattern
+        loop {
+            // Parse a single pattern (could be identifier, wildcard, or nested tuple)
+            patterns.push(self.parse_pattern()?);
+            // If there's a comma, continue parsing more patterns
+            // Otherwise, break the loop
+            if !self.consume_if(TokenType::Comma) {
+                break;
+            }
+        }
+
+        if patterns.len() == 1 {
+            Ok(patterns.remove(0))
+        } else {
+            Ok(Pattern::Tuple(patterns))
+        }
+    }
+
+    pub fn parse_let_decl(&mut self) -> ParseResult<AstNode> {
         let first_tok = self.advance().ok_or(ParseError::EndOfInput)?;
-        let mutable = match first_tok.kind {
-            TokenType::Let => false,
-            TokenType::Var => true,
-            _ => return Err(ParseError::UnexpectedToken("Expected let or var".into())),
-        };
+        if first_tok.kind != TokenType::Let {
+            return Err(ParseError::UnexpectedToken("Expected 'let'".into()));
+        }
 
-        let name = self.expect_ident()?;
+        // Check if keyword found
+        let mut mutable = false;
+        if let Some(tok) = self.peek() {
+            if tok.kind == TokenType::Mut {
+                self.advance(); // consume 'mut'
+                mutable = true;
+            }
+        }
 
+        // Accept a comma-separated pattern list
+        let pattern = self.parse_let_pattern()?;
+
+        // Append type if not explicitly provided
         let mut type_annotation = None;
         if let Some(tok) = self.peek() {
             if tok.kind == TokenType::Colon {
@@ -111,8 +143,8 @@ impl<'a> Parser<'a> {
 
         Ok(AstNode::LetDecl {
             mutable,
-            name,
             type_annotation,
+            pattern,
             value: Box::new(value),
         })
     }
