@@ -4,6 +4,7 @@ use crate::lexar::token::TokenType;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeNode {
+    Float,
     Int,
     String,
     Bool,
