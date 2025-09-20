@@ -23,6 +23,7 @@ pub enum Pattern {
 
 #[derive(Debug, Clone)]
 pub enum AstNode {
+    TupleIdentifier(Vec<String>),
     Program(Vec<AstNode>),
     NumberLiteral(i64),
     Identifier(String),
@@ -45,7 +46,7 @@ pub enum AstNode {
     LetDecl {
         mutable: bool,
         type_annotation: Option<TypeNode>,
-        name: String,
+        pattern: Pattern,
         value: Box<AstNode>,
     },
 
@@ -96,4 +97,6 @@ pub enum AstNode {
         iterable: Option<Box<AstNode>>,
         body: Vec<AstNode>, // keep Vec (block already returns Vec)
     },
+
+    TupleLiteral(Vec<AstNode>),
 }
