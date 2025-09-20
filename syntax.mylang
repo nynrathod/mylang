@@ -25,13 +25,13 @@ enum UserRole {
 
 fn main() {
 
-	use cors(*);
+	// use cors(*);
 
 	// variables
 	let a = 5;
 	let b = "hello";
 
-	let isAdmin: bool = true;
+	let isAdmin: Bool = true;
 	let age: Int = 42;
 
 
@@ -39,7 +39,7 @@ fn main() {
 	let nums: Array<Int> = [1, 2, 3, 4];
 
 	// # Map
-	let	user: Map<String, String> = {"name": "Alice", "role", "admin"};
+	let	user: Map<String, String> = {"name": "Alice", "role": "admin"};
 
 	// Explicit type
 	let userName: String = "Nayan";
