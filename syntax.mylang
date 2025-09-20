@@ -29,14 +29,11 @@ fn main() {
 
 	// variables
 	let a = 5;
-	var b = "hello";
+	let b = "hello";
 
 	let isAdmin: bool = true;
 	let age: Int = 42;
 
-
-	// # Constant (UPPER_SNAKE_CASE), immutable
-	// const MAX_USERS: Int = 100;
 
 	// # Array
 	let nums: Array<Int> = [1, 2, 3, 4];
@@ -50,11 +47,43 @@ fn main() {
 
 
 	// fuction call
-	data, info = GetUser()
-	_, info = GetUser()
+	let data, info = GetUser();
+	let mut _, info = GetUser();
+	let  (a, (b, _)) = SomeFunction8(1, 2);
 
 	for i in 0..n {
 	}
+
+	for i in 0..10 {
+        print(i)   // 0 to 9
+    }
+
+    for i in 0..=10 {
+        print(i)   // 0 to 10 (inclusive)
+    }
+
+    let arr = [1,2,3]
+    for item in arr {
+        print(item)
+    }
+
+    let map = {"a": 1, "b": 2}
+    for key, value in map {
+        print(key, value)
+    }
+
+    for {
+        print("running forever")
+    }
+
+    for (key, value) in map {
+        print(key, value)
+    }
+
+    for Some(x) in maybeValue {
+        print("found", x)
+    }
+
 
 	// statement
 	print("5");
@@ -67,55 +96,22 @@ fn main() {
 	    print("<10")
 	}
 
-}
 
+    // # Private Function (PascalCase)
+    fn GetUser() { }
 
-@Get('/user')
-fn GetUser() -> String, String {
-	return user, userInfo
-}
+    // # Private Function (camelCase)
+    fn getUser() { }
 
+    // function with return type
+    fn GetValue() -> Int{ return 5; }
+    fn getUser() -> Map<String,String> { }
+    fn SomeFunction8(a: Int, b: Int) -> (Int, String, String) { return 5, "s", "sad"; }
 
+    // To do later with router
+   	// @Get('/user')
+    // fn GetUser() -> (String, String) {
+    //   		return user, userInfo
+    // }
 
-// # Private Function (PascalCase)
-fn GetUser() { }
-
-// # Private Function (camelCase)
-fn getUser() { }
-
-// function with return type
-fn getUser() Map<String,String> { }
-
-
-
-
-
-for i in 0..10 {
-    print(i)   // 0 to 9
-}
-
-for i in 0..=10 {
-    print(i)   // 0 to 10 (inclusive)
-}
-
-let arr = [1,2,3]
-for item in arr {
-    print(item)
-}
-
-let map = {"a": 1, "b": 2}
-for key, value in map {
-    print(key, value)
-}
-
-for {
-    print("running forever")
-}
-
-for (key, value) in map {
-    print(key, value)
-}
-
-for Some(x) in maybeValue {
-    print("found", x)
 }
