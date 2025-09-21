@@ -390,60 +390,204 @@ fn main() {
     //     // if, else = GetUser(5);
     //     "#;
 
+    // let input = r#"
+
+    //     //Single values
+    //     // print(42);
+
+    //     // // print(true);
+    //     // print("Hello World");
+    //     // let x: Int = 10;
+    //     // print(x);
+
+    //     // // Multiple items
+    //     // let y: Int = 30;
+    //     // print("x:", x, "y:", y);
+    //     // print(x + y, "sum:", x + y);
+
+    //     // // Arrays / Lists
+    //     // let arr1 = [1, 2, 3];
+    //     // print(arr1);
+    //     // let arr2 = ["a", "b", "c"];
+    //     // print(arr2);
+    //     // print([x, y, x+y]);
+
+    //     // // Maps / Dictionaries
+    //     // let m1 = { "a": 1, "b": 2 };
+    //     // print(m1);
+    //     // let m2 = { "num": x, "str": "hi" };
+    //     // print(m2);
+    //     // print({ "sum": x+y });
+
+    //     // // Nested structures
+    //     // print([[1,2],[3,4]]);
+    //     // print({ "nums": [1,2,3] });
+    //     // print({ "user": { "name": "Alice", "age": 25 } });
+
+    //     // // Expressions directly
+    //     // print(x + y);
+    //     // print(x > y);
+    //     // print("result:", x + y);
+
+    //     // Unsupported types
+    //     // let f: Int = fn() {};
+    //     // print(f);
+
+    //     // Incorrect usage
+    //     // print();
+    //     // print(x y);
+    //     // print("Hello" "World");
+    //     // print(x + );
+
+    //     "#;
+
     let input = r#"
 
-        //Single values
-        // print(42);
-
-        // // print(true);
-        // print("Hello World");
-        // let x: Int = 10;
-        // print(x);
-
-        // // Multiple items
-        // let y: Int = 30;
-        // print("x:", x, "y:", y);
-        // print(x + y, "sum:", x + y);
-
-        // // Arrays / Lists
-        // let arr1 = [1, 2, 3];
-        // print(arr1);
-        // let arr2 = ["a", "b", "c"];
-        // print(arr2);
-        // print([x, y, x+y]);
-
-        // // Maps / Dictionaries
-        // let m1 = { "a": 1, "b": 2 };
-        // print(m1);
-        // let m2 = { "num": x, "str": "hi" };
-        // print(m2);
-        // print({ "sum": x+y });
-
-        // // Nested structures
-        // print([[1,2],[3,4]]);
-        // print({ "nums": [1,2,3] });
-        // print({ "user": { "name": "Alice", "age": 25 } });
-
-        // // Expressions directly
-        // print(x + y);
-        // print(x > y);
-        // print("result:", x + y);
 
 
+// 	// Array of arrays of Int
+// let matrix: [[Int]] = [[1, 2], [3, 4], [5, 6]];
+
+// // Map from Str to array of Int
+// let stats: {Str, [Int]} = {"scores": [10, 20, 30], "levels": [1, 2, 3]};
+
+// // Array of maps from Str to Int
+// let users: [{Str, Int}] = [
+//     {"id": 1, "age": 25},
+//     {"id": 2, "age": 30}
+// ];
+
+// // Map from Str to array of maps from Str to Int
+// let userGroups: {Str, [{Str, Int}]} = {
+//     "admins": [
+//         {"id": 1, "age": 25},
+//         {"id": 2, "age": 30}
+//     ],
+//     "guests": [
+//         {"id": 3, "age": 22}
+//     ]
+// };
+
+
+// // Array of array of maps from Str to Int
+// let deepNested: [[{Str, Int}]] = [
+//     [
+//         {"id": 1, "score": 100},
+//         {"id": 2, "score": 90}
+//     ],
+//     [
+//         {"id": 3, "score": 80}
+//     ]
+// ];
+
+//    let mapmixedkeys = {1: "a", 2: "b"};
+//    let nestedmapmixed = {
+//        "a": {1: "x"}, // Inner map key type conflict
+//        "b": {2: "y"}
+//    };
 
 
 
 
-        // Unsupported types
-        // let f: Int = fn() {};
-        // print(f);
+// Mixing Int and String
+// Semantic error: VarTypeMismatch(TypeMismatch { expected: Int, found: String })
+// let arrmixed = [1, "2", 3];
 
-        // Incorrect usage
-        // print();
-        // print(x y);
-        // print("Hello" "World");
-        // print(x + );
+// Empty array, type can't be inferred
+// Semantic error: EmptyCollectionTypeInferenceError(TypeMismatch { expected: Array(Int), found: Array(Void) })
+// let arrempty: [Int] = [];
 
+// Semantic error: VarTypeMismatch(TypeMismatch { expected: Array(Int), found: Array(String) })
+   // let nestedmixed = [[1, 2], ["a", "b"]]; // Array of arrays, inner arrays have different types
+
+   // // --- Map Errors ---
+    // Keys not same type (Int vs String)
+    // Semantic error: VarTypeMismatch(TypeMismatch { expected: Int, found: String })
+   // let mapmixedvalues = {"a": 1, "b": "2"}; // Values not same type
+
+   // Empty map, can't infer types
+   // Semantic error: EmptyCollectionTypeInferenceError(TypeMismatch { expected: Map(String, Int), found: Map(Void, Void) })
+  // let mapempty: {Str, Int} = {};
+
+
+
+
+   // // --- Map of arrays ---
+   // Semantic error: VarTypeMismatch(TypeMismatch { expected: Array(Int), found: Array(String) })
+   // let mapofarraysmixed = {
+   //     "nums": [1, 2],
+   //     "letters": ["a", "b"] // value type mismatch
+   // };
+
+   // // --- Deeply nested errors ---
+   // Semantic error: VarTypeMismatch(TypeMismatch { expected: Int, found: String })
+   // let deepnestedinvalid: [[{Str, Int}]] = [
+   //     [
+   //         {"id": 1, "score": 100},
+   //         {"id": 2, "score": "high"} // value type mismatch in nested map
+   //     ]
+   // ];
+
+   // Semantic error: InvalidMapKeyType { found: Array(String), expected: [Int, String, Bool] }
+   // let mapwitharraykeys = {
+   //     ["a", "b"]: [1, 2],     // Array as key is invalid if not allowed
+   //     ["c"]: [3]
+   // };
+
+   // // Map from array of Str to array of Int
+   // Semantic error: InvalidMapKeyType { found: Array(String), expected: Map(Int, Void) }
+   // let complexMap: {[Str], [Int]} = {
+   //     ["a", "b"]: [1, 2],
+
+   //     ["c"]: [3]
+   // };
+
+
+   // // --- Array of maps --- to test later
+   // Semantic error: VarTypeMismatch(TypeMismatch { expected: String, found: Int })
+   // let arrofmapsmixed = [
+   //     {"id": 1, "age": 25},
+   //     {"id": "x", "age": 30} // id type mismatch
+   // ];
+
+
+
+
+ //        let i = 0;
+ //       	for i in 0..n {
+	// }
+
+	// for i in 0..10 {
+	//     // 0 to 9
+ //               print(i);
+ //           }
+
+ //           for i in 0..=10 {
+ //           // 0 to 10 (inclusive)
+ //               print(i);
+ //           }
+
+ //           let arr = [1,2,3];
+ //           for item in arr {
+ //               print(item);
+ //           }
+
+ //           let maps = {"a": 1, "b": 2};
+ //           for (key, value) in maps {
+ //               print(key, value);
+ //           }
+
+ //           for {
+ //               print("running forever");
+ //           }
+
+ //           for (key, value) in map {
+ //               print(key, value);
+ //           }
+
+ //           for Some(x) in maybeValue {
+ //               print("found", x);
+ //           }
 
         "#;
 
