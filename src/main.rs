@@ -441,153 +441,207 @@ fn main() {
 
     //     "#;
 
+    // let input = r#"
+
+    //         // 	// Array of arrays of Int
+    //         // let matrix: [[Int]] = [[1, 2], [3, 4], [5, 6]];
+
+    //         // // Map from Str to array of Int
+    //         // let stats: {Str, [Int]} = {"scores": [10, 20, 30], "levels": [1, 2, 3]};
+
+    //         // // Array of maps from Str to Int
+    //         // let users: [{Str, Int}] = [
+    //         //     {"id": 1, "age": 25},
+    //         //     {"id": 2, "age": 30}
+    //         // ];
+
+    //         // // Map from Str to array of maps from Str to Int
+    //         // let userGroups: {Str, [{Str, Int}]} = {
+    //         //     "admins": [
+    //         //         {"id": 1, "age": 25},
+    //         //         {"id": 2, "age": 30}
+    //         //     ],
+    //         //     "guests": [
+    //         //         {"id": 3, "age": 22}
+    //         //     ]
+    //         // };
+
+    //         // // Array of array of maps from Str to Int
+    //         // let deepNested: [[{Str, Int}]] = [
+    //         //     [
+    //         //         {"id": 1, "score": 100},
+    //         //         {"id": 2, "score": 90}
+    //         //     ],
+    //         //     [
+    //         //         {"id": 3, "score": 80}
+    //         //     ]
+    //         // ];
+
+    //         //    let mapmixedkeys = {1: "a", 2: "b"};
+    //         //    let nestedmapmixed = {
+    //         //        "a": {1: "x"}, // Inner map key type conflict
+    //         //        "b": {2: "y"}
+    //         //    };
+
+    //         // Mixing Int and String
+    //         // Semantic error: VarTypeMismatch(TypeMismatch { expected: Int, found: String })
+    //         // let arrmixed = [1, "2", 3];
+
+    //         // Empty array, type can't be inferred
+    //         // Semantic error: EmptyCollectionTypeInferenceError(TypeMismatch { expected: Array(Int), found: Array(Void) })
+    //         // let arrempty: [Int] = [];
+
+    //         // Semantic error: VarTypeMismatch(TypeMismatch { expected: Array(Int), found: Array(String) })
+    //         // let nestedmixed = [[1, 2], ["a", "b"]]; // Array of arrays, inner arrays have different types
+
+    //         // // --- Map Errors ---
+    //             // Keys not same type (Int vs String)
+    //             // Semantic error: VarTypeMismatch(TypeMismatch { expected: Int, found: String })
+    //         // let mapmixedvalues = {"a": 1, "b": "2"}; // Values not same type
+
+    //         // Empty map, can't infer types
+    //         // Semantic error: EmptyCollectionTypeInferenceError(TypeMismatch { expected: Map(String, Int), found: Map(Void, Void) })
+    //         // let mapempty: {Str, Int} = {};
+
+    //         // // --- Map of arrays ---
+    //         // Semantic error: VarTypeMismatch(TypeMismatch { expected: Array(Int), found: Array(String) })
+    //         // let mapofarraysmixed = {
+    //         //     "nums": [1, 2],
+    //         //     "letters": ["a", "b"] // value type mismatch
+    //         // };
+
+    //         // // --- Deeply nested errors ---
+    //         // Semantic error: VarTypeMismatch(TypeMismatch { expected: Int, found: String })
+    //         // let deepnestedinvalid: [[{Str, Int}]] = [
+    //         //     [
+    //         //         {"id": 1, "score": 100},
+    //         //         {"id": 2, "score": "high"} // value type mismatch in nested map
+    //         //     ]
+    //         // ];
+
+    //         // Semantic error: InvalidMapKeyType { found: Array(String), expected: [Int, String, Bool] }
+    //         // let mapwitharraykeys = {
+    //         //     ["a", "b"]: [1, 2],     // Array as key is invalid if not allowed
+    //         //     ["c"]: [3]
+    //         // };
+
+    //         // // Map from array of Str to array of Int
+    //         // Semantic error: InvalidMapKeyType { found: Array(String), expected: Map(Int, Void) }
+    //         // let complexMap: {[Str], [Int]} = {
+    //         //     ["a", "b"]: [1, 2],
+
+    //         //     ["c"]: [3]
+    //         // };
+
+    //         // // --- Array of maps --- to test later
+    //         // Semantic error: VarTypeMismatch(TypeMismatch { expected: String, found: Int })
+    //         // let arrofmapsmixed = [
+    //         //     {"id": 1, "age": 25},
+    //         //     {"id": "x", "age": 30} // id type mismatch
+    //         // ];
+    // "#;
+
     let input = r#"
 
 
 
-// 	// Array of arrays of Int
-// let matrix: [[Int]] = [[1, 2], [3, 4], [5, 6]];
+        let n = 5;
+     //    for i in 0..n {
+    	// }
 
-// // Map from Str to array of Int
-// let stats: {Str, [Int]} = {"scores": [10, 20, 30], "levels": [1, 2, 3]};
+	    // for i in 0..10 {
+			  // // 0 to 9
+     //           print(i);
+     //       }
 
-// // Array of maps from Str to Int
-// let users: [{Str, Int}] = [
-//     {"id": 1, "age": 25},
-//     {"id": 2, "age": 30}
-// ];
+     //       for i in 0..=10 {
+     //            // 0 to 10 (inclusive)
+     //           print(i);
+     //       }
 
-// // Map from Str to array of maps from Str to Int
-// let userGroups: {Str, [{Str, Int}]} = {
-//     "admins": [
-//         {"id": 1, "age": 25},
-//         {"id": 2, "age": 30}
-//     ],
-//     "guests": [
-//         {"id": 3, "age": 22}
-//     ]
-// };
+     //       let arr = [1,2,3];
+     //       for item in arr {
+     //           print(item);
+     //       }
 
+     //       let map = {"a": 1, "b": 2};
+     //       for (key, value) in map {
+     //           print(key, value);
+     //       }
 
-// // Array of array of maps from Str to Int
-// let deepNested: [[{Str, Int}]] = [
-//     [
-//         {"id": 1, "score": 100},
-//         {"id": 2, "score": 90}
-//     ],
-//     [
-//         {"id": 3, "score": 80}
-//     ]
-// ];
+     //       for {
+     //           print("running forever");
+     //       }
 
-//    let mapmixedkeys = {1: "a", 2: "b"};
-//    let nestedmapmixed = {
-//        "a": {1: "x"}, // Inner map key type conflict
-//        "b": {2: "y"}
-//    };
+     //       for (key, value) in map {
+     //           print(key, value);
+     //       }
 
 
 
 
-// Mixing Int and String
-// Semantic error: VarTypeMismatch(TypeMismatch { expected: Int, found: String })
-// let arrmixed = [1, "2", 3];
-
-// Empty array, type can't be inferred
-// Semantic error: EmptyCollectionTypeInferenceError(TypeMismatch { expected: Array(Int), found: Array(Void) })
-// let arrempty: [Int] = [];
-
-// Semantic error: VarTypeMismatch(TypeMismatch { expected: Array(Int), found: Array(String) })
-   // let nestedmixed = [[1, 2], ["a", "b"]]; // Array of arrays, inner arrays have different types
-
-   // // --- Map Errors ---
-    // Keys not same type (Int vs String)
-    // Semantic error: VarTypeMismatch(TypeMismatch { expected: Int, found: String })
-   // let mapmixedvalues = {"a": 1, "b": "2"}; // Values not same type
-
-   // Empty map, can't infer types
-   // Semantic error: EmptyCollectionTypeInferenceError(TypeMismatch { expected: Map(String, Int), found: Map(Void, Void) })
-  // let mapempty: {Str, Int} = {};
 
 
+     // Map iteration with wrong pattern
+         // INVALID: must destructure as (key, value)
+     let map = {"a": 1, "b": 2};
+     //     for key in map {
+     //         print(key);
+     //     }
 
+         // Tuple pattern mismatch in map
+         // for (k) in map {
+         //     print(k);
+         // }
 
-   // // --- Map of arrays ---
-   // Semantic error: VarTypeMismatch(TypeMismatch { expected: Array(Int), found: Array(String) })
-   // let mapofarraysmixed = {
-   //     "nums": [1, 2],
-   //     "letters": ["a", "b"] // value type mismatch
-   // };
-
-   // // --- Deeply nested errors ---
-   // Semantic error: VarTypeMismatch(TypeMismatch { expected: Int, found: String })
-   // let deepnestedinvalid: [[{Str, Int}]] = [
-   //     [
-   //         {"id": 1, "score": 100},
-   //         {"id": 2, "score": "high"} // value type mismatch in nested map
-   //     ]
-   // ];
-
-   // Semantic error: InvalidMapKeyType { found: Array(String), expected: [Int, String, Bool] }
-   // let mapwitharraykeys = {
-   //     ["a", "b"]: [1, 2],     // Array as key is invalid if not allowed
-   //     ["c"]: [3]
-   // };
-
-   // // Map from array of Str to array of Int
-   // Semantic error: InvalidMapKeyType { found: Array(String), expected: Map(Int, Void) }
-   // let complexMap: {[Str], [Int]} = {
-   //     ["a", "b"]: [1, 2],
-
-   //     ["c"]: [3]
-   // };
-
-
-   // // --- Array of maps --- to test later
-   // Semantic error: VarTypeMismatch(TypeMismatch { expected: String, found: Int })
-   // let arrofmapsmixed = [
-   //     {"id": 1, "age": 25},
-   //     {"id": "x", "age": 30} // id type mismatch
-   // ];
+         // Array iteration with tuple pattern
+         // let arr = [1, 2, 3];
+         // for (x, y) in arr {
+         //     print(x, y);
+         // }
 
 
 
+         // // Iterating non-iterable type
+         // let maybeValue = "20";
+         // for x in maybeValue {
+         //     print(x);
+         // }
 
- //        let i = 0;
- //       	for i in 0..n {
-	// }
+         // let num = 42;
+         // for x in num {
+         //     print(x); // INVALID: Int is not iterable
+         // }
 
-	// for i in 0..10 {
-	//     // 0 to 9
- //               print(i);
- //           }
+         // // Tuple pattern length mismatch
+         // let tuplearr = {"a": 1, "b": 2};
+         // for (a, b, c) in tuplearr {
+         //     print(a, b, c); // INVALID: tuple length 2 but pattern expects 3
+         // }
 
- //           for i in 0..=10 {
- //           // 0 to 10 (inclusive)
- //               print(i);
- //           }
+         // // Using literal directly without range
+         // for i in 10 {
+         //     print(i); // INVALID: literal not iterable
+         // }
 
- //           let arr = [1,2,3];
- //           for item in arr {
- //               print(item);
- //           }
+         // // Using expression that is not iterable
+         // let maybeBool = true;
+         // for b in maybeBool {
+         //     print(b); // INVALID: Bool not iterable
+         // }
 
- //           let maps = {"a": 1, "b": 2};
- //           for (key, value) in maps {
- //               print(key, value);
- //           }
 
- //           for {
- //               print("running forever");
- //           }
+         // // Nested redeclaration in same loop body (if strict)
+         // for x in arr {
+         //     let x = 10; // INVALID in strict mode: variable redeclared inside same scope
+         //     print(x);
+         // }
 
- //           for (key, value) in map {
- //               print(key, value);
- //           }
 
- //           for Some(x) in maybeValue {
- //               print("found", x);
- //           }
+        // let maybeValue = "20";
+        //    for Some(x) in maybeValue {
+        //        print("found", x);
+        //    }
 
         "#;
 

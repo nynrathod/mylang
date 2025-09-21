@@ -87,6 +87,11 @@ impl SemanticAnalyzer {
             }
 
             AstNode::Break | AstNode::Continue => Ok(()),
+            AstNode::ForLoopStmt {
+                pattern, // Pattern type
+                iterable,
+                body,
+            } => self.analyze_for_stmt(pattern, iterable.as_deref_mut(), body),
 
             // Expressions used as statements
             _ => {

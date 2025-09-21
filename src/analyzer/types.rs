@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use crate::parser::ast::TypeNode;
+use crate::parser::ast::{Pattern, TypeNode};
 
 #[derive(Debug)]
 pub struct TypeMismatch {
@@ -73,5 +73,24 @@ pub enum SemanticError {
     },
     UnexpectedNode {
         expected: String,
+    },
+
+    // For
+    InvalidForIterableType {
+        found: TypeNode,
+    },
+    ArrayIterationWithTuple {
+        tuple_len: usize,
+    },
+    MapIterationRequiresTuple,
+    NonIterableType {
+        found: TypeNode,
+    },
+    InfiniteLoopWithPattern {
+        pattern: Pattern,
+    },
+    RangeIterationTypeMismatch {
+        expected: TypeNode,
+        found: TypeNode,
     },
 }

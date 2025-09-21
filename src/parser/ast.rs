@@ -14,6 +14,7 @@ pub enum TypeNode {
     Tuple(Vec<TypeNode>),
     Void,
     Struct(HashMap<String, TypeNode>),
+    Range(Box<TypeNode>, Box<TypeNode>, bool),
 }
 
 #[derive(Debug, Clone)]

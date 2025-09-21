@@ -56,6 +56,22 @@ impl SemanticAnalyzer {
                         Ok(TypeNode::Bool)
                     }
 
+                    TokenType::RangeExc | TokenType::RangeInc => {
+                        if left_type != right_type {
+                            return Err(SemanticError::OperatorTypeMismatch(TypeMismatch {
+                                expected: left_type,
+                                found: right_type,
+                            }));
+                        }
+
+                        let inclusive = matches!(op, TokenType::RangeInc);
+                        Ok(TypeNode::Range(
+                            Box::new(left_type),
+                            Box::new(right_type),
+                            inclusive,
+                        ))
+                    }
+
                     // Logical gates
                     TokenType::AndAnd | TokenType::OrOr => {
                         if left_type != TypeNode::Bool || right_type != TypeNode::Bool {
