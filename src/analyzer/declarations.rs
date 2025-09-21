@@ -234,6 +234,14 @@ impl SemanticAnalyzer {
             value,
         } = node
         {
+            // Prevent assignment from variable without type info
+            if type_annotation.is_none() && matches!(**value, AstNode::Identifier(_)) {
+                return Err(SemanticError::VarTypeMismatch(TypeMismatch {
+                    expected: TypeNode::Void,
+                    found: TypeNode::Void,
+                }));
+            }
+
             // Determine the type of the RHS (value being assigned)
             let rhs_type = if let Some(annotated_type) = type_annotation.as_ref() {
                 // If the variable has a type annotation, check that RHS matches it

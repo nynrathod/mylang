@@ -111,22 +111,33 @@ impl SemanticAnalyzer {
             }
 
             AstNode::ArrayLiteral(elements) => {
+                // Error if Array is empty, can't infer types
                 if elements.is_empty() {
                     return Err(SemanticError::EmptyCollectionTypeInferenceError(
                         TypeMismatch {
                             expected: TypeNode::Array(Box::new(TypeNode::Int)),
-                            found: TypeNode::Array(Box::new(TypeNode::Int)),
+                            found: TypeNode::Array(Box::new(TypeNode::Void)),
                         },
                     ));
                 }
 
-                // Use the first element to infer array types,
-                // mixing [1, "2", "hello"]; not supported
+                // Use first element to infer array type
                 let first_type = self.infer_type(&elements[0])?;
+                // Check all elements for type consistency
+                for el in elements.iter() {
+                    let t = self.infer_type(el)?;
+                    if t != first_type {
+                        return Err(SemanticError::VarTypeMismatch(TypeMismatch {
+                            expected: first_type.clone(),
+                            found: t,
+                        }));
+                    }
+                }
                 Ok(TypeNode::Array(Box::new(first_type)))
             }
 
             AstNode::MapLiteral(pairs) => {
+                // Error if map is empty, can't infer types
                 if pairs.is_empty() {
                     return Err(SemanticError::EmptyCollectionTypeInferenceError(
                         TypeMismatch {
@@ -135,16 +146,49 @@ impl SemanticAnalyzer {
                                 Box::new(TypeNode::Int),
                             ),
                             found: TypeNode::Map(
-                                Box::new(TypeNode::String),
-                                Box::new(TypeNode::Int),
+                                Box::new(TypeNode::Void),
+                                Box::new(TypeNode::Void),
                             ),
                         },
                     ));
                 }
-                // Use the first key-value pair to infer map types
-                // mixing (e.g., { "a": 1, 2: "b" }) is NOT supported
+
+                // Infer key and value types from first pair
                 let key_type = self.infer_type(&pairs[0].0)?;
                 let value_type = self.infer_type(&pairs[0].1)?;
+
+                // Only allow Int, String, or Bool as map keys
+                match key_type {
+                    TypeNode::Int | TypeNode::String | TypeNode::Bool => {}
+                    _ => {
+                        return Err(SemanticError::InvalidMapKeyType {
+                            found: key_type.clone(),
+                            expected: TypeNode::Map(
+                                Box::new(TypeNode::Int),
+                                Box::new(TypeNode::String),
+                            ),
+                        });
+                    }
+                }
+
+                // Check all pairs for type consistency
+                for (k, v) in pairs.iter() {
+                    let kt = self.infer_type(k)?;
+                    let vt = self.infer_type(v)?;
+                    if kt != key_type {
+                        return Err(SemanticError::VarTypeMismatch(TypeMismatch {
+                            expected: key_type.clone(),
+                            found: kt,
+                        }));
+                    }
+                    if vt != value_type {
+                        return Err(SemanticError::VarTypeMismatch(TypeMismatch {
+                            expected: value_type.clone(),
+                            found: vt,
+                        }));
+                    }
+                }
+
                 Ok(TypeNode::Map(Box::new(key_type), Box::new(value_type)))
             }
 

@@ -27,6 +27,10 @@ pub enum SemanticError {
         target: String,
     },
     OutOfScopeVariable(NamedError),
+    InvalidMapKeyType {
+        found: TypeNode,
+        expected: TypeNode,
+    },
 
     // Function Declaration/Call Errors
     FunctionRedeclaration(NamedError),
