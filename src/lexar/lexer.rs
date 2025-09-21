@@ -16,7 +16,6 @@ pub fn lex(input: &str) -> Vec<Token<'_>> {
     keywords.insert("import", TokenType::Import);
     keywords.insert("struct", TokenType::Struct);
     keywords.insert("enum", TokenType::Enum);
-    keywords.insert("map", TokenType::Map);
 
     // Control flow statements
     keywords.insert("if", TokenType::If);

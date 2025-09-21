@@ -265,37 +265,34 @@ impl<'a> Parser<'a> {
     }
 
     pub(crate) fn parse_type_annotation(&mut self) -> ParseResult<TypeNode> {
-        let tok = self.peek().ok_or(ParseError::EndOfInput)?;
-        if tok.kind != TokenType::Identifier {
-            return Err(ParseError::UnexpectedToken(
-                "Expected type Identifier".into(),
-            ));
-        }
-
-        let tok = self.advance().unwrap();
-
-        match tok.value {
-            "Int" => Ok(TypeNode::Int),
-            "String" => Ok(TypeNode::String),
-            "Bool" => Ok(TypeNode::Bool),
-            "Array" => {
-                self.expect(TokenType::Lt)?;
-                let inner_type = self.parse_type_annotation()?;
-                self.expect(TokenType::Gt)?;
-                Ok(TypeNode::Array(Box::new(inner_type)))
+        if self.peek_is(TokenType::OpenBracket) {
+            self.advance(); // consume '['
+            let inner = self.parse_type_annotation()?;
+            self.expect(TokenType::CloseBracket)?;
+            Ok(TypeNode::Array(Box::new(inner)))
+        } else if self.peek_is(TokenType::OpenBrace) {
+            self.advance(); // consume '{'
+            let key = self.parse_type_annotation()?;
+            self.expect(TokenType::Comma)?;
+            let value = self.parse_type_annotation()?;
+            self.expect(TokenType::CloseBrace)?;
+            Ok(TypeNode::Map(Box::new(key), Box::new(value)))
+        } else if self.peek_is(TokenType::Identifier) {
+            let tok = self.advance().unwrap();
+            match tok.value {
+                "Int" => Ok(TypeNode::Int),
+                "Str" => Ok(TypeNode::String),
+                "Bool" => Ok(TypeNode::Bool),
+                "Void" => Ok(TypeNode::Void),
+                _ => Err(ParseError::UnexpectedToken(format!(
+                    "Expected type identifier, got {}",
+                    tok.value
+                ))),
             }
-            "Map" => {
-                self.expect(TokenType::Lt)?;
-                let key_type = self.parse_type_annotation()?;
-                self.expect(TokenType::Comma)?;
-                let value_type = self.parse_type_annotation()?;
-                self.expect(TokenType::Gt)?;
-                Ok(TypeNode::Map(Box::new(key_type), Box::new(value_type)))
-            }
-            _ => Err(ParseError::UnexpectedToken(format!(
-                "Expected type identifier, got {}",
-                tok.value
-            ))),
+        } else {
+            Err(ParseError::UnexpectedToken(
+                "Expected type annotation".into(),
+            ))
         }
     }
 

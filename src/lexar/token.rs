@@ -7,7 +7,6 @@ pub enum TokenType {
     Import,   // import
     Struct,   // struct
     Enum,     // enum
-    Map,      // map
     If,       // if
     Else,     // else
     For,      // for

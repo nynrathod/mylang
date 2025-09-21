@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use crate::lexar::token::TokenType;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeNode {
@@ -12,6 +13,7 @@ pub enum TypeNode {
     Map(Box<TypeNode>, Box<TypeNode>), // Map<String, Int>
     Tuple(Vec<TypeNode>),
     Void,
+    Struct(HashMap<String, TypeNode>),
 }
 
 #[derive(Debug, Clone)]
