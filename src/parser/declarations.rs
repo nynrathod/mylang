@@ -284,6 +284,10 @@ impl<'a> Parser<'a> {
                 "Str" => Ok(TypeNode::String),
                 "Bool" => Ok(TypeNode::Bool),
                 "Void" => Ok(TypeNode::Void),
+                other => {
+                    // Accept any previously declared struct as type
+                    Ok(TypeNode::TypeRef(other.to_string()))
+                }
                 _ => Err(ParseError::UnexpectedToken(format!(
                     "Expected type identifier, got {}",
                     tok.value

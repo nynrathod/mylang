@@ -16,6 +16,7 @@ impl SemanticAnalyzer {
             return Err(SemanticError::InvalidConditionType(TypeMismatch {
                 expected: TypeNode::Bool,
                 found: cond_type,
+                value: None,
             }));
         }
 

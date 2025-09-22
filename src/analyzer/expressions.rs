@@ -51,6 +51,7 @@ impl SemanticAnalyzer {
                             return Err(SemanticError::OperatorTypeMismatch(TypeMismatch {
                                 expected: left_type,
                                 found: right_type,
+                                value: None,
                             }));
                         }
                         Ok(TypeNode::Bool)
@@ -61,6 +62,7 @@ impl SemanticAnalyzer {
                             return Err(SemanticError::OperatorTypeMismatch(TypeMismatch {
                                 expected: left_type,
                                 found: right_type,
+                                value: None,
                             }));
                         }
 
@@ -82,6 +84,7 @@ impl SemanticAnalyzer {
                                 } else {
                                     right_type
                                 },
+                                value: None,
                             }));
                         }
                         Ok(TypeNode::Bool)
@@ -99,6 +102,7 @@ impl SemanticAnalyzer {
                             return Err(SemanticError::OperatorTypeMismatch(TypeMismatch {
                                 expected: left_type,
                                 found: right_type,
+                                value: None,
                             }));
                         }
                     },
@@ -133,6 +137,7 @@ impl SemanticAnalyzer {
                         TypeMismatch {
                             expected: TypeNode::Array(Box::new(TypeNode::Int)),
                             found: TypeNode::Array(Box::new(TypeNode::Void)),
+                            value: None,
                         },
                     ));
                 }
@@ -146,6 +151,7 @@ impl SemanticAnalyzer {
                         return Err(SemanticError::VarTypeMismatch(TypeMismatch {
                             expected: first_type.clone(),
                             found: t,
+                            value: None,
                         }));
                     }
                 }
@@ -165,6 +171,7 @@ impl SemanticAnalyzer {
                                 Box::new(TypeNode::Void),
                                 Box::new(TypeNode::Void),
                             ),
+                            value: None,
                         },
                     ));
                 }
@@ -195,12 +202,14 @@ impl SemanticAnalyzer {
                         return Err(SemanticError::VarTypeMismatch(TypeMismatch {
                             expected: key_type.clone(),
                             found: kt,
+                            value: None,
                         }));
                     }
                     if vt != value_type {
                         return Err(SemanticError::VarTypeMismatch(TypeMismatch {
                             expected: value_type.clone(),
                             found: vt,
+                            value: None,
                         }));
                     }
                 }

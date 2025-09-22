@@ -13,8 +13,10 @@ pub enum TypeNode {
     Map(Box<TypeNode>, Box<TypeNode>), // Map<String, Int>
     Tuple(Vec<TypeNode>),
     Void,
-    Struct(HashMap<String, TypeNode>),
+    Struct(String, HashMap<String, TypeNode>), // StructName -> field types
+    Enum(String, HashMap<String, Option<TypeNode>>),
     Range(Box<TypeNode>, Box<TypeNode>, bool),
+    TypeRef(String),
 }
 
 #[derive(Debug, Clone)]

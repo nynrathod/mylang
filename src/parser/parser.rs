@@ -11,8 +11,8 @@ pub enum ParseError {
 pub type ParseResult<T> = Result<T, ParseError>;
 
 pub struct Parser<'a> {
-    tokens: &'a [Token<'a>],
-    current: usize,
+    pub tokens: &'a [Token<'a>],
+    pub current: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -20,7 +20,7 @@ impl<'a> Parser<'a> {
         Parser { tokens, current: 0 }
     }
 
-    pub(crate) fn peek(&self) -> Option<&Token<'a>> {
+    pub fn peek(&self) -> Option<&Token<'a>> {
         self.tokens.get(self.current)
     }
 
@@ -28,7 +28,7 @@ impl<'a> Parser<'a> {
         self.peek().map(|tok| tok.kind == kind).unwrap_or(false)
     }
 
-    pub(crate) fn advance(&mut self) -> Option<&Token<'a>> {
+    pub fn advance(&mut self) -> Option<&Token<'a>> {
         let tok = self.tokens.get(self.current);
         if tok.is_some() {
             self.current += 1;
@@ -48,10 +48,13 @@ impl<'a> Parser<'a> {
     pub(crate) fn expect(&mut self, kind: TokenType) -> ParseResult<&Token<'a>> {
         match self.advance() {
             Some(tok) if tok.kind == kind => Ok(tok),
-            Some(tok) => Err(ParseError::UnexpectedToken(format!(
-                "Expected {:?}, got {:?}",
-                kind, tok.kind
-            ))),
+            Some(tok) => {
+                println!("Token identifier: {:?}", tok);
+                Err(ParseError::UnexpectedToken(format!(
+                    "Expected {:?}, got {:?} ({:?})",
+                    kind, tok.kind, tok.value
+                )))
+            }
             None => Err(ParseError::EndOfInput),
         }
     }

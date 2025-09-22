@@ -56,10 +56,6 @@ fn main() {
 	let userName: Str = "Nayan";
 	let userData: [Str] = ["Nayan", "Rathod"];
 
-	{[]} => stats: {Str: [Int]} = {
-    [{}] => users: [{Str:Int}]
-
-
 	// fuction call
 	let data, info = GetUser();
 	let mut _, info = GetUser();

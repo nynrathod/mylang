@@ -1,11 +1,12 @@
 #![allow(dead_code)]
 
-use crate::parser::ast::{Pattern, TypeNode};
+use crate::parser::ast::{AstNode, Pattern, TypeNode};
 
 #[derive(Debug)]
 pub struct TypeMismatch {
     pub expected: TypeNode,
     pub found: TypeNode,
+    pub value: Option<Box<AstNode>>,
 }
 
 #[derive(Debug)]
@@ -92,5 +93,20 @@ pub enum SemanticError {
     RangeIterationTypeMismatch {
         expected: TypeNode,
         found: TypeNode,
+    },
+
+    // Struct
+    StructRedeclaration(NamedError),
+    DuplicateField {
+        struct_name: String,
+        field: String,
+    },
+
+    // Enum
+    EnumRedeclaration(NamedError),
+
+    DuplicateEnumVariant {
+        enum_name: String,
+        variant: String,
     },
 }
