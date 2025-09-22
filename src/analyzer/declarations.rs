@@ -179,6 +179,7 @@ impl SemanticAnalyzer {
                                     .map(|v| self.infer_type(v))
                                     .collect::<Result<Vec<_>, _>>()?,
                             ),
+                            value: None,
                         },
                     });
                 }
@@ -190,6 +191,7 @@ impl SemanticAnalyzer {
                             mismatch: TypeMismatch {
                                 expected: expected_type.clone(),
                                 found: value_type,
+                                value: None,
                             },
                         });
                     }
@@ -208,6 +210,7 @@ impl SemanticAnalyzer {
                                     .map(|v| self.infer_type(v))
                                     .collect::<Result<Vec<_>, _>>()?,
                             ),
+                            value: None,
                         },
                     });
                 }
@@ -218,6 +221,7 @@ impl SemanticAnalyzer {
                         mismatch: TypeMismatch {
                             expected: expected.clone(),
                             found: value_type,
+                            value: None,
                         },
                     });
                 }
@@ -239,6 +243,7 @@ impl SemanticAnalyzer {
                 return Err(SemanticError::VarTypeMismatch(TypeMismatch {
                     expected: TypeNode::Void,
                     found: TypeNode::Void,
+                    value: None,
                 }));
             }
 
@@ -247,9 +252,11 @@ impl SemanticAnalyzer {
                 // If the variable has a type annotation, check that RHS matches it
                 let rhs_type = self.infer_type(value)?;
                 if rhs_type != *annotated_type {
+                    // print!("valuehello {:?}", value);
                     return Err(SemanticError::VarTypeMismatch(TypeMismatch {
                         expected: annotated_type.clone(),
                         found: rhs_type,
+                        value: Some(value.clone()),
                     }));
                 }
                 annotated_type.clone()
@@ -307,6 +314,63 @@ impl SemanticAnalyzer {
                     }
                 }
             }
+        }
+        Ok(())
+    }
+
+    pub fn analyze_struct(&mut self, node: &AstNode) -> Result<(), SemanticError> {
+        if let AstNode::StructDecl { name, fields } = node {
+            if self.symbol_table.contains_key(name) {
+                return Err(SemanticError::StructRedeclaration(NamedError {
+                    name: name.clone(),
+                }));
+            }
+
+            let mut field_map = HashMap::new();
+            for (field_name, field_type) in fields {
+                if field_map.contains_key(field_name) {
+                    return Err(SemanticError::DuplicateField {
+                        struct_name: name.clone(),
+                        field: field_name.clone(),
+                    });
+                }
+                field_map.insert(field_name.clone(), field_type.clone());
+            }
+
+            // Insert struct type into the symbol table
+            self.symbol_table.insert(
+                name.clone(),
+                (TypeNode::Struct(name.clone(), field_map), false),
+            );
+        }
+        Ok(())
+    }
+
+    /// Analyze an enum declaration
+    pub fn analyze_enum(&mut self, node: &AstNode) -> Result<(), SemanticError> {
+        if let AstNode::EnumDecl { name, variants } = node {
+            if self.symbol_table.contains_key(name) {
+                return Err(SemanticError::EnumRedeclaration(NamedError {
+                    name: name.clone(),
+                }));
+            }
+
+            let mut variant_map = HashMap::new();
+            for (variant_name, variant_type) in variants {
+                if variant_map.contains_key(variant_name) {
+                    return Err(SemanticError::DuplicateEnumVariant {
+                        enum_name: name.clone(),
+                        variant: variant_name.clone(),
+                    });
+                }
+                variant_map.insert(variant_name.clone(), variant_type.clone());
+            }
+
+            // Insert enum type into the symbol table
+            self.symbol_table.insert(
+                name.clone(),
+                (TypeNode::Enum(name.clone(), variant_map), false),
+            );
         }
         Ok(())
     }

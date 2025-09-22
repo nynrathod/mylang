@@ -93,6 +93,16 @@ impl SemanticAnalyzer {
                 body,
             } => self.analyze_for_stmt(pattern, iterable.as_deref_mut(), body),
 
+            AstNode::StructDecl { .. } => self.analyze_struct(node),
+
+            AstNode::EnumDecl { .. } => self.analyze_enum(node),
+            // existing cases ...
+            _ => {
+                // fallback to previous implementation
+                self.infer_type(node)?;
+                Ok(())
+            }
+
             // Expressions used as statements
             _ => {
                 // Catch-all for any AST nodes not explicitly handled above.
