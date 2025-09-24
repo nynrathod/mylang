@@ -57,20 +57,31 @@ impl SemanticAnalyzer {
                         Ok(TypeNode::Bool)
                     }
 
+                    // Ranges for loops
+                    // TokenType::RangeExc = exclusive range (e.g., 0..5)
+                    // TokenType::RangeInc = inclusive range (e.g., 0..=5)
                     TokenType::RangeExc | TokenType::RangeInc => {
-                        if left_type != right_type {
+                        // Both start (left) and end (right) of the range must be integers
+                        if left_type != TypeNode::Int || right_type != TypeNode::Int {
                             return Err(SemanticError::OperatorTypeMismatch(TypeMismatch {
-                                expected: left_type,
-                                found: right_type,
+                                expected: TypeNode::Int, // expected type is Int
+                                found: if left_type != TypeNode::Int {
+                                    left_type
+                                } else {
+                                    right_type
+                                },
                                 value: None,
                             }));
                         }
 
+                        // Determine if the range is inclusive (..=) or exclusive (..)
                         let inclusive = matches!(op, TokenType::RangeInc);
+
+                        // Return the type of the range: Range<Int, Int, inclusive>
                         Ok(TypeNode::Range(
-                            Box::new(left_type),
-                            Box::new(right_type),
-                            inclusive,
+                            Box::new(TypeNode::Int), // start type
+                            Box::new(TypeNode::Int), // end type
+                            inclusive,               // inclusive/exclusive
                         ))
                     }
 
@@ -97,14 +108,13 @@ impl SemanticAnalyzer {
                     | TokenType::Slash
                     | TokenType::Percent => match (left_type.clone(), right_type.clone()) {
                         (TypeNode::Int, TypeNode::Int) => Ok(TypeNode::Int),
+                        // Float is not supported for now
                         (TypeNode::Float, TypeNode::Float) => Ok(TypeNode::Float),
-                        _ => {
-                            return Err(SemanticError::OperatorTypeMismatch(TypeMismatch {
-                                expected: left_type,
-                                found: right_type,
-                                value: None,
-                            }));
-                        }
+                        _ => Err(SemanticError::OperatorTypeMismatch(TypeMismatch {
+                            expected: left_type,
+                            found: right_type,
+                            value: None,
+                        })),
                     },
 
                     _ => unimplemented!("Operator {:?} not handled", op),

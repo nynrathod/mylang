@@ -110,16 +110,17 @@ impl SemanticAnalyzer {
                         })
                     }
                 },
-                TypeNode::Range(start_type, _end_type, _inclusive) => {
-                    // Range: only identifier or wildcard allowed
+                TypeNode::Range(_, _, _) => {
                     if let Pattern::Identifier(_) | Pattern::Wildcard = pattern {
-                        self.bind_pattern_to_type(pattern, &*start_type)?;
+                        // iterator is always Int
+                        self.bind_pattern_to_type(pattern, &TypeNode::Int)?;
                     } else {
                         return Err(SemanticError::InvalidAssignmentTarget {
                             target: "Loop variable pattern does not match range type".to_string(),
                         });
                     }
                 }
+
                 _ => {
                     return Err(SemanticError::InvalidAssignmentTarget {
                         target: "Cannot iterate non-iterable type".to_string(),

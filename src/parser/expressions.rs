@@ -4,85 +4,38 @@ use crate::parser::{ParseError, ParseResult, Parser};
 
 impl<'a> Parser<'a> {
     pub fn parse_expression(&mut self) -> ParseResult<AstNode> {
-        if let Some(tok) = self.peek() {
+        self.parse_expression_prec(0)
+    }
+
+    fn parse_expression_prec(&mut self, min_prec: u8) -> ParseResult<AstNode> {
+        // Parse unary first
+        let mut left = if let Some(tok) = self.peek() {
             match tok.kind {
                 TokenType::Bang | TokenType::Minus | TokenType::Plus => {
                     let op = tok.kind;
                     self.advance(); // consume operator
-                    let expr = self.parse_expression()?; // recurse into right-hand side
-                    return Ok(AstNode::UnaryExpr {
+                    let expr = self.parse_expression_prec(7)?; // unary has high precedence
+                    AstNode::UnaryExpr {
                         op,
                         expr: Box::new(expr),
-                    });
-                }
-                _ => {}
-            }
-        }
-
-        let mut left = match self.peek() {
-            Some(tok) => match tok.kind {
-                TokenType::Number => {
-                    let tok = self.advance().unwrap();
-                    AstNode::NumberLiteral(tok.value.parse::<i64>().unwrap())
-                }
-                TokenType::Identifier => {
-                    let tok = self.advance().unwrap();
-                    let name = tok.value.to_string();
-
-                    // Check for function call
-                    if self.peek_is(TokenType::OpenParen) {
-                        self.advance(); // consume '('
-                        let mut args = Vec::new();
-                        while !self.peek_is(TokenType::CloseParen) {
-                            args.push(self.parse_expression()?); // recursive parse
-                            if !self.consume_if(TokenType::Comma) {
-                                break;
-                            }
-                        }
-                        self.expect(TokenType::CloseParen)?;
-                        return Ok(AstNode::FunctionCall {
-                            func: Box::new(AstNode::Identifier(name)), // wrap the function name as Identifier
-                            args,                                      // your parsed arguments
-                        });
                     }
-
-                    AstNode::Identifier(name)
                 }
-
-                TokenType::String => {
-                    let tok = self.advance().unwrap();
-                    AstNode::StringLiteral(tok.value.to_string())
-                }
-                TokenType::Boolean => {
-                    let tok = self.advance().unwrap();
-                    let value = match tok.value {
-                        "true" => true,
-                        "false" => false,
-                        _ => unreachable!(),
-                    };
-                    AstNode::BoolLiteral(value)
-                }
-                TokenType::OpenBracket => self.parse_array_literal()?,
-                TokenType::OpenBrace => self.parse_map_literal()?,
-                _ => {
-                    return Err(ParseError::UnexpectedToken(format!(
-                        "Expected number, identifier or string, got {:?}",
-                        tok.kind
-                    )))
-                }
-            },
-            None => return Err(ParseError::EndOfInput),
+                _ => self.parse_primary()?,
+            }
+        } else {
+            return Err(ParseError::EndOfInput);
         };
 
-        // Inside parse_expression
+        // Handle binary operators with precedence
         while let Some(tok) = self.peek() {
-            if !Self::is_binary_op(tok.kind) {
-                // <-- use Self::
+            let prec = Self::get_precedence(tok.kind);
+            if prec < min_prec || prec == 0 {
                 break;
             }
+
             let op = tok.kind;
             self.advance();
-            let right = self.parse_expression()?;
+            let mut right = self.parse_expression_prec(prec + 1)?;
             left = AstNode::BinaryExpr {
                 left: Box::new(left),
                 op,
@@ -91,6 +44,53 @@ impl<'a> Parser<'a> {
         }
 
         Ok(left)
+    }
+
+    fn parse_primary(&mut self) -> ParseResult<AstNode> {
+        if let Some(tok) = self.peek() {
+            match tok.kind {
+                TokenType::Number => {
+                    let tok = self.advance().unwrap();
+                    Ok(AstNode::NumberLiteral(tok.value.parse::<i64>().unwrap()))
+                }
+                TokenType::Identifier => {
+                    let tok = self.advance().unwrap();
+                    let name = tok.value.to_string();
+
+                    if self.peek_is(TokenType::OpenParen) {
+                        self.advance(); // consume '('
+                        let args = self.parse_comma_separated(
+                            |p| p.parse_expression(),
+                            TokenType::CloseParen,
+                        )?;
+                        self.expect(TokenType::CloseParen)?;
+                        return Ok(AstNode::FunctionCall {
+                            func: Box::new(AstNode::Identifier(name)),
+                            args,
+                        });
+                    }
+
+                    Ok(AstNode::Identifier(name))
+                }
+                TokenType::String => {
+                    let tok = self.advance().unwrap();
+                    Ok(AstNode::StringLiteral(tok.value.to_string()))
+                }
+                TokenType::Boolean => {
+                    let tok = self.advance().unwrap();
+                    let value = tok.value == "true";
+                    Ok(AstNode::BoolLiteral(value))
+                }
+                TokenType::OpenBracket => self.parse_array_literal(),
+                TokenType::OpenBrace => self.parse_map_literal(),
+                _ => Err(ParseError::UnexpectedToken(format!(
+                    "Expected primary expression, got {:?}",
+                    tok.kind
+                ))),
+            }
+        } else {
+            Err(ParseError::EndOfInput)
+        }
     }
 
     fn parse_array_literal(&mut self) -> ParseResult<AstNode> {
@@ -151,5 +151,18 @@ impl<'a> Parser<'a> {
                 | TokenType::RangeExc
                 | TokenType::RangeInc
         )
+    }
+
+    fn get_precedence(op: TokenType) -> u8 {
+        match op {
+            TokenType::OrOr => 1,
+            TokenType::AndAnd => 2,
+            TokenType::EqEq | TokenType::NotEq => 3,
+            TokenType::Lt | TokenType::Gt | TokenType::LtEq | TokenType::GtEq => 4,
+            TokenType::Plus | TokenType::Minus => 5,
+            TokenType::Star | TokenType::Slash | TokenType::Percent => 6,
+            TokenType::RangeExc | TokenType::RangeInc => 7,
+            _ => 0,
+        }
     }
 }

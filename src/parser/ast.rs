@@ -105,4 +105,26 @@ pub enum AstNode {
     },
 
     TupleLiteral(Vec<AstNode>),
+
+    Range {
+        start: Box<AstNode>,
+        end: Box<AstNode>,
+        inclusive: bool,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub enum BinaryOp {
+    Plus,
+    Minus,
+    Mul,
+    Div,
+    Gt,
+    Lt,
+    Eq,
+    Ne,
+    Ge,
+    Le,
+    And,
+    Or,
 }

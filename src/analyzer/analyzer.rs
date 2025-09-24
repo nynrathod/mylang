@@ -96,20 +96,13 @@ impl SemanticAnalyzer {
             AstNode::StructDecl { .. } => self.analyze_struct(node),
 
             AstNode::EnumDecl { .. } => self.analyze_enum(node),
-            // existing cases ...
-            _ => {
-                // fallback to previous implementation
-                self.infer_type(node)?;
-                Ok(())
-            }
 
-            // Expressions used as statements
+            // Catch-all for any AST nodes not explicitly handled above.
+            // We call `infer_type` to:
+            // Validate that all identifiers exist in scope.
+            // Ensure expressions (literals, binary/unary ops, function calls) are type-correct.
+            // Future-proof: new AST node types will still be semantically validated.
             _ => {
-                // Catch-all for any AST nodes not explicitly handled above.
-                // We call `infer_type` to:
-                // Validate that all identifiers exist in scope.
-                // Ensure expressions (literals, binary/unary ops, function calls) are type-correct.
-                // Future-proof: new AST node types will still be semantically validated.
                 self.infer_type(node)?;
                 Ok(())
             }
