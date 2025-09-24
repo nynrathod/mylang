@@ -62,13 +62,13 @@ fn recursiveFunc(x: Int) -> Int { return recursiveFunc(x - 1); }
 // ASSIGNMENTS - VALID CASES
 let mut b1 = "s";
 let mut a1 = "s";
-a = getValue();
+let a2 = getValue();
 let mut x1: Int = 0;
 let mut y1: Str = "";
-x1, y1 = processData(1, 2);
+let x11, y11 = processData(1, 2);
 let mut z1: Int = 0;
 fn getUserDetails(a: Int) ->(Int,Int,Int) { return a,a,a; }
-z1, FAplaceholder, y1 = getUserDetails(5);
+let z12, t12, y12 = getUserDetails(5);
 
 // PRINT STATEMENTS - VALID CASES
 print(42);
@@ -129,7 +129,7 @@ let validNestedMap = {
 
 // FOR LOOPS - VALID CASES
 let n1 = 5;
-for i in 0..n {
+for i in 0..n1 {
 }
 
 for i in 0..10 {
@@ -144,6 +144,25 @@ let arr = [1,2,3];
 for item in arr {
     print(item);
 }
+
+
+
+
+
+for i in 0..10 {
+    if i == 5 { break; }
+    print(i);
+}
+
+for i in 0..10 {
+    if i % 2 == 0 { continue; }
+    print(i);
+}
+
+for _ in 1..=10 {
+    print("Hello");
+}
+
 
 let map = {"a": 1, "b": 2};
 for (key, value) in map {
