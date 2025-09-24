@@ -75,7 +75,7 @@ fn main() {
     let input = fs::read_to_string("./test_cases.mylang").unwrap();
     let tokens = lex(&input);
 
-    const DEV_MODE: bool = true;
+    const DEV_MODE: bool = false;
     const PRINT_AST: bool = true;
 
     let mut parser = Parser::new(&tokens);
@@ -115,7 +115,7 @@ fn main() {
                             // ===== INTEGRATE MIR =====
                             let mut mir_builder = MirBuilder::new();
                             mir_builder.build_program(nodes);
-                            // mir_builder.finalize();
+                            mir_builder.finalize();
                             // println!("\nGenerated SSA MIR:\n{:#?}", mir_builder.program);
                             println!("\nGenerated SSA MIR:\n{}", mir_builder.program);
 

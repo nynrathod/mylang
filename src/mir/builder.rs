@@ -324,22 +324,50 @@ impl MirBuilder {
         func_name
     }
 
-    // // Method to finalize the MIR program and perform optimizations
-    // pub fn finalize(&mut self) {
-    //     // Remove empty blocks
-    //     for func in &mut self.program.functions {
-    //         func.blocks
-    //             .retain(|block| !block.instrs.is_empty() || block.terminator.is_some());
-    //     }
+    /// Finalize the MIR program: clean up and lightweight optimizations
+    pub fn finalize(&mut self) {
+        use std::collections::HashSet;
 
-    //     // Remove duplicate globals (basic deduplication)
-    //     let mut seen_assigns = std::collections::HashSet::new();
-    //     self.program.globals.retain(|instr| {
-    //         if let MirInstr::Assign { name, .. } = instr {
-    //             seen_assigns.insert(name.clone())
-    //         } else {
-    //             true
-    //         }
-    //     });
-    // }
+        // 1. Remove empty blocks (blocks without instructions and no terminator)
+        for func in &mut self.program.functions {
+            func.blocks
+                .retain(|block| !block.instrs.is_empty() || block.terminator.is_some());
+        }
+
+        // 2. Deduplicate global constants / assignments by name
+        //    Ensures multiple identical constants are not emitted repeatedly
+        let mut seen_assigns: HashSet<String> = HashSet::new();
+        self.program.globals.retain(|instr| {
+            match instr {
+                MirInstr::Assign { name, .. }
+                | MirInstr::ConstString { name, .. }
+                | MirInstr::StructInit { name, .. }
+                | MirInstr::EnumInit { name, .. } => {
+                    if seen_assigns.contains(name) {
+                        false // already seen, remove duplicate
+                    } else {
+                        seen_assigns.insert(name.clone());
+                        true
+                    }
+                }
+                _ => true,
+            }
+        });
+
+        // 3. Optional: merge consecutive constant assignments to same target
+        //    (if MIR has %tmp1 = const, %tmp1 = const again, keep last)
+        let mut last_assigns: HashSet<String> = HashSet::new();
+        self.program.globals.retain(|instr| {
+            if let MirInstr::Assign { name, .. } = instr {
+                if last_assigns.contains(name) {
+                    false
+                } else {
+                    last_assigns.insert(name.clone());
+                    true
+                }
+            } else {
+                true
+            }
+        });
+    }
 }
