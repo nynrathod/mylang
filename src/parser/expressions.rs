@@ -51,7 +51,7 @@ impl<'a> Parser<'a> {
             match tok.kind {
                 TokenType::Number => {
                     let tok = self.advance().unwrap();
-                    Ok(AstNode::NumberLiteral(tok.value.parse::<i64>().unwrap()))
+                    Ok(AstNode::NumberLiteral(tok.value.parse::<i32>().unwrap()))
                 }
                 TokenType::Identifier => {
                     let tok = self.advance().unwrap();

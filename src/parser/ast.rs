@@ -31,7 +31,7 @@ pub enum Pattern {
 pub enum AstNode {
     TupleIdentifier(Vec<String>),
     Program(Vec<AstNode>),
-    NumberLiteral(i64),
+    NumberLiteral(i32),
     Identifier(String),
     StringLiteral(String),
     BoolLiteral(bool),
