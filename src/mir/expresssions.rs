@@ -1,7 +1,7 @@
 use crate::{
     lexar::token::TokenType,
     mir::{builder::MirBuilder, MirBlock, MirInstr},
-    parser::ast::AstNode,
+    parser::ast::{AstNode, TypeNode},
 };
 
 /// Convert AST expressions to MIR temporaries
@@ -63,28 +63,50 @@ pub fn build_expression(builder: &mut MirBuilder, expr: &AstNode, block: &mut Mi
                     let rhs_tmp = build_expression(builder, right, block);
                     let dest_tmp = builder.next_tmp();
 
-                    let op_str = match op {
-                        TokenType::Plus => "add",
-                        TokenType::Minus => "sub",
-                        TokenType::Star => "mul",
-                        TokenType::Slash => "div",
-                        TokenType::Gt => "gt",
-                        TokenType::Lt => "lt",
-                        TokenType::GtEq => "ge",
-                        TokenType::LtEq => "le",
-                        TokenType::EqEq => "eq",
-                        TokenType::NotEq => "ne",
-                        TokenType::Percent => "rem",
-                        _ => "unknown",
-                    }
-                    .to_string();
+                    if *op == TokenType::Plus {
+                        // String concatenation if both operands are string literals
+                        if matches!(&**left, AstNode::StringLiteral(_))
+                            && matches!(&**right, AstNode::StringLiteral(_))
+                        {
+                            block.instrs.push(MirInstr::StringConcat {
+                                name: dest_tmp.clone(),
+                                left: lhs_tmp,
+                                right: rhs_tmp,
+                            });
+                        } else {
+                            // Otherwise assume integer addition
+                            block.instrs.push(MirInstr::BinaryOp(
+                                "add".to_string(),
+                                dest_tmp.clone(),
+                                lhs_tmp,
+                                rhs_tmp,
+                            ));
+                        }
+                    } else {
+                        // Other binary operators
+                        let op_str = match op {
+                            TokenType::Minus => "sub",
+                            TokenType::Star => "mul",
+                            TokenType::Slash => "div",
+                            TokenType::Gt => "gt",
+                            TokenType::Lt => "lt",
+                            TokenType::GtEq => "ge",
+                            TokenType::LtEq => "le",
+                            TokenType::EqEq => "eq",
+                            TokenType::NotEq => "ne",
+                            TokenType::Percent => "rem",
+                            _ => "unknown",
+                        }
+                        .to_string();
 
-                    block.instrs.push(MirInstr::BinaryOp(
-                        op_str,
-                        dest_tmp.clone(),
-                        lhs_tmp,
-                        rhs_tmp,
-                    ));
+                        block.instrs.push(MirInstr::BinaryOp(
+                            op_str,
+                            dest_tmp.clone(),
+                            lhs_tmp,
+                            rhs_tmp,
+                        ));
+                    }
+
                     dest_tmp
                 }
             }
