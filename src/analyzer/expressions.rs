@@ -108,6 +108,8 @@ impl SemanticAnalyzer {
                     | TokenType::Slash
                     | TokenType::Percent => match (left_type.clone(), right_type.clone()) {
                         (TypeNode::Int, TypeNode::Int) => Ok(TypeNode::Int),
+                        // allow string concatenation
+                        (TypeNode::String, TypeNode::String) => Ok(TypeNode::String),
                         // Float is not supported for now
                         (TypeNode::Float, TypeNode::Float) => Ok(TypeNode::Float),
                         _ => Err(SemanticError::OperatorTypeMismatch(TypeMismatch {
