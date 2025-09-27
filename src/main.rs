@@ -1,4 +1,5 @@
 mod analyzer;
+mod codegen;
 mod lexar;
 mod mir;
 mod parser;
@@ -10,6 +11,7 @@ use parser::Parser;
 use std::fs;
 
 use crate::lexar::token::{Token, TokenType};
+use codegen::CodeGen;
 use mir::builder::MirBuilder;
 
 fn skip_to_next_statement(parser: &mut Parser) {
@@ -116,10 +118,22 @@ fn main() {
                             let mut mir_builder = MirBuilder::new();
                             mir_builder.build_program(nodes);
                             mir_builder.finalize();
-                            // println!("\nGenerated SSA MIR:\n{:#?}", mir_builder.program);
-                            println!("\nGenerated SSA MIR:\n{}", mir_builder.program);
+                            println!("\nGenerated SSA MIR:\n{:#?}", mir_builder.program);
+                            // println!("\nGenerated SSA MIR:\n{}", mir_builder.program);
 
-                            // =========================
+                            // ===== INTEGRATE CODEGEN =====
+                            let context = inkwell::context::Context::create();
+                            let mut codegen = CodeGen::new("main_module", &context);
+                            codegen.generate_program(&mir_builder.program);
+
+                            println!("Generated LLVM IR:");
+                            codegen.dump(); // This prints to stderr
+
+                            // Also save to file
+                            let llvm_ir = codegen.module.print_to_string();
+                            std::fs::write("output.ll", llvm_ir.to_string()).unwrap();
+                            println!("LLVM IR written to output.ll");
+                            // =============================
                         }
                         Err(e) => {
                             println!("\nSemantic analysis failed: {:?}", e);
