@@ -115,10 +115,10 @@ fn main() {
                             println!("\nSemantic analysis passed");
 
                             if PRINT_AST {
-                                println!(
-                                    "AST after semantic analysis:\n{:#?}",
-                                    AstNode::Program(nodes.clone())
-                                );
+                                // println!(
+                                //     "AST after semantic analysis:\n{:#?}",
+                                //     AstNode::Program(nodes.clone())
+                                // );
                             }
 
                             // ===== INTEGRATE MIR =====
@@ -128,17 +128,17 @@ fn main() {
 
                             let mir_program = &mir_builder.program;
 
-                            println!("=== MIR DUMP ===");
-                            for (fi, func) in mir_program.functions.iter().enumerate() {
-                                println!("Function {}: {}", fi, func.name);
-                                for (bi, block) in func.blocks.iter().enumerate() {
-                                    println!("  Block {}:", bi);
-                                    for (ii, instr) in block.instrs.iter().enumerate() {
-                                        println!("    {}: {:?}", ii, instr);
-                                    }
-                                }
-                            }
-                            println!("=== END MIR ===");
+                            // println!("=== MIR DUMP ===");
+                            // for (fi, func) in mir_program.functions.iter().enumerate() {
+                            //     println!("Function {}: {}", fi, func.name);
+                            //     for (bi, block) in func.blocks.iter().enumerate() {
+                            //         println!("  Block {}:", bi);
+                            //         for (ii, instr) in block.instrs.iter().enumerate() {
+                            //             println!("    {}: {:?}", ii, instr);
+                            //         }
+                            //     }
+                            // }
+                            // println!("=== END MIR ===");
 
                             // println!("\nGenerated SSA MIR:\n{:#?}", mir_builder.program);
                             // println!("\nGenerated SSA MIR:\n{}", mir_builder.program);

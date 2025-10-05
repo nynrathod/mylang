@@ -277,9 +277,9 @@ impl SemanticAnalyzer {
                 *type_annotation = Some(rhs_type.clone());
 
                 // ✅ Update AST with reference counting info
-                println!("Before: {:?}", is_ref_counted);
+                // println!("Before: {:?}", is_ref_counted);
                 *is_ref_counted = Some(Self::should_be_rc(&rhs_type));
-                println!("After: {:?}", is_ref_counted);
+                // println!("After: {:?}", is_ref_counted);
 
                 // Flatten the LHS pattern
                 let mut targets = Vec::new();
