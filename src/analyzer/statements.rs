@@ -1,5 +1,6 @@
 use super::analyzer::SemanticAnalyzer;
 use super::types::{SemanticError, TypeMismatch};
+use crate::analyzer::analyzer::SymbolInfo;
 use crate::analyzer::types::NamedError;
 use crate::parser::ast::{AstNode, Pattern, TypeNode};
 
@@ -157,7 +158,14 @@ impl SemanticAnalyzer {
                         name: name.clone(),
                     }));
                 }
-                self.symbol_table.insert(name.clone(), (ty.clone(), false));
+                self.symbol_table.insert(
+                    name.clone(),
+                    SymbolInfo {
+                        ty: ty.clone(),
+                        mutable: false,
+                        is_ref_counted: Self::should_be_rc(&ty),
+                    },
+                );
             }
             Pattern::Wildcard => {} // `_` ignores type
             Pattern::Tuple(patterns) => match ty {

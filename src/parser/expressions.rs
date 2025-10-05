@@ -106,15 +106,19 @@ impl<'a> Parser<'a> {
     fn parse_map_literal(&mut self) -> ParseResult<AstNode> {
         self.expect(TokenType::OpenBrace)?;
 
-        let entries = self.parse_comma_separated(
-            |parser| {
-                let key = parser.parse_expression()?;
-                parser.expect(TokenType::Colon)?;
-                let value = parser.parse_expression()?;
-                Ok((key, value))
-            },
-            TokenType::CloseBrace,
-        )?;
+        let mut entries = Vec::new();
+
+        while !self.peek_is(TokenType::CloseBrace) {
+            let key = self.parse_expression()?; // parse key
+            self.expect(TokenType::Colon)?; // expect ':'
+            let value = self.parse_expression()?; // parse value
+            entries.push((key, value));
+
+            // comma after value, not after key
+            if !self.consume_if(TokenType::Comma) {
+                break;
+            }
+        }
 
         self.expect(TokenType::CloseBrace)?;
         Ok(AstNode::MapLiteral(entries))

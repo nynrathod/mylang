@@ -2,6 +2,7 @@ use crate::mir::builder::MirBuilder;
 use crate::mir::expresssions::build_expression;
 use crate::mir::statements::build_statement;
 use crate::mir::{MirBlock, MirFunction, MirInstr};
+use crate::parser::ast::TypeNode;
 use crate::parser::ast::{AstNode, Pattern};
 
 pub fn build_function_decl(builder: &mut MirBuilder, node: &AstNode) -> MirFunction {
@@ -27,6 +28,9 @@ pub fn build_function_decl(builder: &mut MirBuilder, node: &AstNode) -> MirFunct
             terminator: None,
         };
 
+        // ENTER FUNCTION SCOPE - track RC variables
+        builder.enter_scope();
+
         // Add arguments - map parameter names to temporaries
         for (param_name, _) in params {
             let tmp = builder.next_tmp();
@@ -45,6 +49,9 @@ pub fn build_function_decl(builder: &mut MirBuilder, node: &AstNode) -> MirFunct
             build_statement(builder, stmt, &mut block);
         }
 
+        // EXIT SCOPE - insert DecRef for all tracked variables BEFORE return
+        builder.exit_scope(&mut block);
+
         // If no explicit return and function has no return type, add implicit return
         if block.terminator.is_none() && return_type.is_none() {
             block.terminator = Some(MirInstr::Return { values: vec![] });
@@ -62,6 +69,8 @@ pub fn build_let_decl(builder: &mut MirBuilder, node: &AstNode) -> Vec<MirInstr>
         pattern,
         value,
         mutable,
+        type_annotation,
+        is_ref_counted,
         ..
     } = node
     {
@@ -80,6 +89,13 @@ pub fn build_let_decl(builder: &mut MirBuilder, node: &AstNode) -> Vec<MirInstr>
         // Add the expression evaluation instructions to our result
         instrs.extend(temp_block.instrs);
 
+        let needs_rc = match type_annotation {
+            Some(TypeNode::String) => true,
+            Some(TypeNode::Array(_)) => true,
+            Some(TypeNode::Map(_, _)) => true,
+            _ => false,
+        };
+
         // Handle different binding patterns
         match pattern {
             Pattern::Identifier(name) => {
@@ -88,6 +104,15 @@ pub fn build_let_decl(builder: &mut MirBuilder, node: &AstNode) -> Vec<MirInstr>
                     value: value_tmp,
                     mutable: *mutable,
                 });
+
+                let is_copy = matches!(&**value, AstNode::Identifier(_));
+                // Insert IncRef if this value needs RC
+                if needs_rc {
+                    instrs.push(MirInstr::IncRef {
+                        value: name.clone(),
+                    });
+                    builder.track_rc_var(name.clone());
+                }
             }
             Pattern::Tuple(patterns) => {
                 // Handle tuple destructuring: let (x, y, z) = func();
@@ -104,6 +129,13 @@ pub fn build_let_decl(builder: &mut MirBuilder, node: &AstNode) -> Vec<MirInstr>
                             value: extract_tmp,
                             mutable: *mutable,
                         });
+
+                        // RC for tuple elements (check if needed)
+                        if is_ref_counted.unwrap_or(false) {
+                            instrs.push(MirInstr::IncRef {
+                                value: name.clone(),
+                            });
+                        }
                     }
                 }
             }

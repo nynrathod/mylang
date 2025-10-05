@@ -7,9 +7,10 @@ use crate::parser::ast::{AstNode, Pattern};
 /// Main MIR builder - converts AST to MIR representation
 pub struct MirBuilder {
     pub program: MirProgram,
-    pub tmp_counter: usize,           // For generating unique temporaries
-    pub block_counter: usize,         // For generating unique block labels
-    pub loop_stack: Vec<LoopContext>, // Track nested loops for break/continue
+    pub tmp_counter: usize,                // For generating unique temporaries
+    pub block_counter: usize,              // For generating unique block labels
+    pub loop_stack: Vec<LoopContext>,      // Track nested loops for break/continue
+    pub rc_tracked_vars: Vec<Vec<String>>, // Stack of scopes with RC'd vars
 }
 
 /// Context for tracking loop break/continue targets
@@ -28,7 +29,8 @@ impl MirBuilder {
             },
             tmp_counter: 1,
             block_counter: 0,
-            loop_stack: vec![], // NEW
+            loop_stack: vec![],
+            rc_tracked_vars: vec![vec![]],
         }
     }
 
@@ -59,6 +61,30 @@ impl MirBuilder {
 
     pub fn current_loop(&self) -> Option<&LoopContext> {
         self.loop_stack.last()
+    }
+
+    pub fn enter_scope(&mut self) {
+        self.rc_tracked_vars.push(vec![]);
+    }
+
+    pub fn exit_scope(&mut self, block: &mut MirBlock) {
+        if let Some(scope_vars) = self.rc_tracked_vars.pop() {
+            // Insert DecRef for all RC'd variables in this scope
+            for var in scope_vars.iter().rev() {
+                block.instrs.push(MirInstr::DecRef { value: var.clone() });
+            }
+        }
+    }
+
+    pub fn track_rc_var(&mut self, var: String) {
+        if let Some(current_scope) = self.rc_tracked_vars.last_mut() {
+            current_scope.push(var);
+        }
+    }
+    pub fn is_rc_tracked(&self, var: &str) -> bool {
+        self.rc_tracked_vars
+            .iter()
+            .any(|scope| scope.contains(&var.to_string()))
     }
 
     pub fn build_program(&mut self, nodes: &[AstNode]) {
@@ -312,6 +338,13 @@ impl MirBuilder {
                     );
                 }
             }
+        }
+
+        let global_scope_vars = self.rc_tracked_vars.last().cloned().unwrap_or_default();
+        for var in global_scope_vars.iter().rev() {
+            self.program
+                .globals
+                .push(MirInstr::DecRef { value: var.clone() });
         }
     }
 

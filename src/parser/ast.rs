@@ -17,6 +17,7 @@ pub enum TypeNode {
     Enum(String, HashMap<String, Option<TypeNode>>),
     Range(Box<TypeNode>, Box<TypeNode>, bool),
     TypeRef(String),
+    RefCounted(Box<TypeNode>),
 }
 
 #[derive(Debug, Clone)]
@@ -54,6 +55,7 @@ pub enum AstNode {
         type_annotation: Option<TypeNode>,
         pattern: Pattern,
         value: Box<AstNode>,
+        is_ref_counted: Option<bool>,
     },
 
     StructDecl {

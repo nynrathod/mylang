@@ -2,6 +2,7 @@ use super::analyzer::SemanticAnalyzer;
 use std::collections::HashMap;
 
 use super::types::{NamedError, SemanticError, TypeMismatch};
+use crate::analyzer::analyzer::SymbolInfo;
 use crate::parser::ast::{AstNode, TypeNode};
 
 impl SemanticAnalyzer {
@@ -38,7 +39,7 @@ impl SemanticAnalyzer {
         }
 
         // Create a local scope for function parameters
-        let mut local_scope: HashMap<String, (TypeNode, bool)> = HashMap::new();
+        let mut local_scope: HashMap<String, SymbolInfo> = HashMap::new();
 
         for (param_name, param_type) in params.iter() {
             // Type is mandator if parameter passed. Check type exists
@@ -56,7 +57,14 @@ impl SemanticAnalyzer {
             }
 
             // Insert parameter into local scope (immutable)
-            local_scope.insert(param_name.clone(), (param_type.clone(), false));
+            local_scope.insert(
+                param_name.clone(),
+                SymbolInfo {
+                    ty: param_type.clone(),
+                    mutable: false,
+                    is_ref_counted: Self::should_be_rc(&param_type),
+                },
+            );
         }
 
         // mark as Void if no return type
@@ -231,91 +239,104 @@ impl SemanticAnalyzer {
     }
 
     pub fn analyze_let_decl(&mut self, node: &mut AstNode) -> Result<(), SemanticError> {
-        if let AstNode::LetDecl {
-            mutable,
-            type_annotation,
-            pattern,
-            value,
-        } = node
-        {
-            // Prevent assignment from variable without type info
-            if type_annotation.is_none() && matches!(**value, AstNode::Identifier(_)) {
-                return Err(SemanticError::VarTypeMismatch(TypeMismatch {
-                    expected: TypeNode::Void,
-                    found: TypeNode::Void,
-                    value: None,
-                }));
-            }
+        match node {
+            AstNode::LetDecl {
+                mutable,
+                type_annotation,
+                pattern,
+                value,
+                is_ref_counted,
+            } => {
+                // Prevent assignment from variable without type info
+                // if type_annotation.is_none() && matches!(**value, AstNode::Identifier(_)) {
+                //     return Err(SemanticError::VarTypeMismatch(TypeMismatch {
+                //         expected: TypeNode::Void,
+                //         found: TypeNode::Void,
+                //         value: None,
+                //     }));
+                // }
 
-            // Determine the type of the RHS (value being assigned)
-            let rhs_type = if let Some(annotated_type) = type_annotation.as_ref() {
-                // If the variable has a type annotation, check that RHS matches it
-                let rhs_type = self.infer_type(value)?;
-                if rhs_type != *annotated_type {
-                    // print!("valuehello {:?}", value);
-                    return Err(SemanticError::VarTypeMismatch(TypeMismatch {
-                        expected: annotated_type.clone(),
-                        found: rhs_type,
-                        value: Some(value.clone()),
-                    }));
+                // Determine the type of the RHS (value being assigned)
+                let rhs_type = if let Some(annotated_type) = type_annotation.as_ref() {
+                    // If the variable has a type annotation, check that RHS matches it
+                    let rhs_type = self.infer_type(value)?;
+                    if rhs_type != *annotated_type {
+                        return Err(SemanticError::VarTypeMismatch(TypeMismatch {
+                            expected: annotated_type.clone(),
+                            found: rhs_type,
+                            value: Some(value.clone()),
+                        }));
+                    }
+                    annotated_type.clone()
+                } else {
+                    // No annotation: infer type from the value
+                    self.infer_type(value)?
+                };
+
+                // Update the type annotation to reflect the inferred type if it was missing
+                *type_annotation = Some(rhs_type.clone());
+
+                // ✅ Update AST with reference counting info
+                println!("Before: {:?}", is_ref_counted);
+                *is_ref_counted = Some(Self::should_be_rc(&rhs_type));
+                println!("After: {:?}", is_ref_counted);
+
+                // Flatten the LHS pattern
+                let mut targets = Vec::new();
+                Self::flatten_pattern(pattern, &mut targets);
+
+                // If RHS is a tuple, each element must match a pattern
+                // Otherwise, treat RHS as a single-element list
+                let rhs_types = match &rhs_type {
+                    TypeNode::Tuple(types) => types.clone(),
+                    t => vec![t.clone()],
+                };
+
+                // Check that the number of LHS patterns matches the number of RHS types
+                if rhs_types.len() != targets.len() {
+                    return Err(SemanticError::TupleAssignmentMismatch {
+                        expected: rhs_types.len(),
+                        found: targets.len(),
+                    });
                 }
-                annotated_type.clone()
-            } else {
-                // No annotation: infer type from the value
-                self.infer_type(value)?
-            };
 
-            // Update the type annotation to reflect the inferred type if it was missing
-            *type_annotation = Some(rhs_type.clone());
-
-            // Flatten the LHS pattern
-            let mut targets = Vec::new();
-            Self::flatten_pattern(pattern, &mut targets);
-
-            // If RHS is a tuple, each element must match a pattern
-            // Otherwise, treat RHS as a single-element list
-            let rhs_types = match &rhs_type {
-                TypeNode::Tuple(types) => types.clone(),
-                t => vec![t.clone()],
-            };
-
-            // Check that the number of LHS patterns matches the number of RHS types
-            if rhs_types.len() != targets.len() {
-                return Err(SemanticError::TupleAssignmentMismatch {
-                    expected: rhs_types.len(),
-                    found: targets.len(),
-                });
-            }
-
-            // Bind each pattern to its type in the symbol table
-            for (target, ty) in targets.iter().zip(rhs_types.iter()) {
-                match target {
-                    // Identifier: add to symbol table, mark mutability
-                    crate::parser::ast::Pattern::Identifier(name) => {
-                        // Prevent redeclaration
-                        if self.symbol_table.contains_key(name) {
-                            return Err(SemanticError::VariableRedeclaration(NamedError {
-                                name: name.clone(),
-                            }));
+                // Bind each pattern to its type in the symbol table
+                for (target, ty) in targets.iter().zip(rhs_types.iter()) {
+                    match target {
+                        // Identifier: add to symbol table, mark mutability
+                        crate::parser::ast::Pattern::Identifier(name) => {
+                            // Prevent redeclaration
+                            if self.symbol_table.contains_key(name) {
+                                return Err(SemanticError::VariableRedeclaration(NamedError {
+                                    name: name.clone(),
+                                }));
+                            }
+                            // Skip wildcards
+                            if name != "_" {
+                                self.symbol_table.insert(
+                                    name.clone(),
+                                    SymbolInfo {
+                                        ty: ty.clone(),
+                                        mutable: *mutable,
+                                        is_ref_counted: Self::should_be_rc(&ty),
+                                    },
+                                );
+                            }
                         }
-                        // Skip wildcards
-                        if name != "_" {
-                            self.symbol_table
-                                .insert(name.clone(), (ty.clone(), *mutable));
+                        // Wildcard: allowed but not stored
+                        crate::parser::ast::Pattern::Wildcard => {}
+                        // Anything else: invalid pattern
+                        _ => {
+                            return Err(SemanticError::InvalidAssignmentTarget {
+                                target: format!("{:?}", target),
+                            });
                         }
                     }
-                    // Wildcard: allowed but not stored
-                    crate::parser::ast::Pattern::Wildcard => {}
-                    // Anything else: invalid pattern
-                    _ => {
-                        return Err(SemanticError::InvalidAssignmentTarget {
-                            target: format!("{:?}", target),
-                        });
-                    }
                 }
+                Ok(())
             }
+            _ => Ok(()),
         }
-        Ok(())
     }
 
     pub fn analyze_struct(&mut self, node: &AstNode) -> Result<(), SemanticError> {
@@ -340,7 +361,11 @@ impl SemanticAnalyzer {
             // Insert struct type into the symbol table
             self.symbol_table.insert(
                 name.clone(),
-                (TypeNode::Struct(name.clone(), field_map), false),
+                SymbolInfo {
+                    ty: TypeNode::Struct(name.clone(), field_map),
+                    mutable: false,
+                    is_ref_counted: true,
+                },
             );
         }
         Ok(())
@@ -369,7 +394,11 @@ impl SemanticAnalyzer {
             // Insert enum type into the symbol table
             self.symbol_table.insert(
                 name.clone(),
-                (TypeNode::Enum(name.clone(), variant_map), false),
+                SymbolInfo {
+                    ty: TypeNode::Enum(name.clone(), variant_map),
+                    mutable: false,
+                    is_ref_counted: true,
+                },
             );
         }
         Ok(())

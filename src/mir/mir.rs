@@ -31,6 +31,14 @@ pub struct MirBlock {
 /// MIR instruction types - covers all operations in the language
 #[derive(Debug, Clone)]
 pub enum MirInstr {
+    // Reference counting operations
+    IncRef {
+        value: String, // temp/variable to increment
+    },
+    DecRef {
+        value: String, // temp/variable to decrement
+    },
+
     // Basic constants
     ConstInt {
         name: String,

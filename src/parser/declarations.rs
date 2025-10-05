@@ -146,6 +146,7 @@ impl<'a> Parser<'a> {
             type_annotation,
             pattern,
             value: Box::new(value),
+            is_ref_counted: None,
         })
     }
 
@@ -273,7 +274,7 @@ impl<'a> Parser<'a> {
         } else if self.peek_is(TokenType::OpenBrace) {
             self.advance(); // consume '{'
             let key = self.parse_type_annotation()?;
-            self.expect(TokenType::Comma)?;
+            self.expect(TokenType::Colon)?;
             let value = self.parse_type_annotation()?;
             self.expect(TokenType::CloseBrace)?;
             Ok(TypeNode::Map(Box::new(key), Box::new(value)))

@@ -63,19 +63,22 @@ pub fn build_statement(builder: &mut MirBuilder, stmt: &AstNode, block: &mut Mir
                 },
             });
 
+            // Then block with scope tracking
+            builder.enter_scope();
             let mut then_mir_block = MirBlock {
                 label: then_label,
                 instrs: vec![],
-                terminator: Some(MirInstr::Jump {
-                    target: end_label.clone(),
-                }),
+                terminator: None,
             };
 
             for stmt in then_block {
                 build_statement(builder, stmt, &mut then_mir_block);
             }
 
+            builder.exit_scope(&mut then_mir_block); // DecRefs inserted here
+
             if let Some(else_stmt) = else_branch {
+                builder.enter_scope();
                 let mut else_mir_block = MirBlock {
                     label: else_label,
                     instrs: vec![],
@@ -84,6 +87,13 @@ pub fn build_statement(builder: &mut MirBuilder, stmt: &AstNode, block: &mut Mir
                     }),
                 };
                 build_statement(builder, else_stmt, &mut else_mir_block);
+                builder.exit_scope(&mut else_mir_block);
+
+                if else_mir_block.terminator.is_none() {
+                    else_mir_block.terminator = Some(MirInstr::Jump {
+                        target: end_label.clone(),
+                    });
+                }
 
                 if let Some(current_func) = builder.program.functions.last_mut() {
                     current_func.blocks.push(then_mir_block);
@@ -110,6 +120,7 @@ pub fn build_statement(builder: &mut MirBuilder, stmt: &AstNode, block: &mut Mir
             pattern,
             value,
             mutable,
+            is_ref_counted,
             ..
         } => {
             let value_tmp = build_expression(builder, value, block);

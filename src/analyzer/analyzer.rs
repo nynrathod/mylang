@@ -2,11 +2,18 @@ use crate::analyzer::types::{NamedError, SemanticError};
 use crate::parser::ast::{AstNode, Pattern, TypeNode};
 use std::collections::HashMap;
 
+#[derive(Clone)]
+pub struct SymbolInfo {
+    pub ty: TypeNode,
+    pub mutable: bool,
+    pub is_ref_counted: bool,
+}
+
 pub struct SemanticAnalyzer {
-    pub(crate) symbol_table: HashMap<String, (TypeNode, bool)>, // current scope variables
+    pub(crate) symbol_table: HashMap<String, SymbolInfo>, // current scope variables
     pub(crate) function_table: HashMap<String, (Vec<TypeNode>, TypeNode)>,
 
-    pub(crate) outer_symbol_table: Option<HashMap<String, (TypeNode, bool)>>,
+    pub(crate) outer_symbol_table: Option<HashMap<String, SymbolInfo>>,
 }
 
 impl SemanticAnalyzer {
@@ -24,6 +31,13 @@ impl SemanticAnalyzer {
             self.analyze_node(node)?;
         }
         Ok(())
+    }
+
+    pub fn should_be_rc(ty: &TypeNode) -> bool {
+        matches!(
+            ty,
+            TypeNode::Array(_) | TypeNode::Map(_, _) | TypeNode::String
+        )
     }
 
     /// Check if any node contains a return statement
@@ -272,7 +286,14 @@ impl SemanticAnalyzer {
             if let Pattern::Identifier(name) = target {
                 // Ignore wildcard `_`, only insert real names
                 if name != "_" {
-                    self.symbol_table.insert(name.clone(), (ty.clone(), true));
+                    self.symbol_table.insert(
+                        name.clone(),
+                        SymbolInfo {
+                            ty: ty.clone(),
+                            mutable: true,
+                            is_ref_counted: Self::should_be_rc(&ty),
+                        },
+                    );
                 }
             }
         }

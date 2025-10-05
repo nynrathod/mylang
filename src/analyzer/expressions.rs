@@ -11,11 +11,11 @@ impl SemanticAnalyzer {
             AstNode::BoolLiteral(_) => Ok(TypeNode::Bool),
 
             AstNode::Identifier(name) => {
-                if let Some((t, _)) = self.symbol_table.get(name) {
-                    Ok(t.clone())
+                if let Some(info) = self.symbol_table.get(name) {
+                    Ok(info.ty.clone())
                 } else if let Some(outer) = &self.outer_symbol_table {
                     // If variable defined out of function
-                    if let Some((_t, _)) = outer.get(name) {
+                    if outer.contains_key(name) {
                         return Err(SemanticError::OutOfScopeVariable(NamedError {
                             name: name.clone(),
                         }));
