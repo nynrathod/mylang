@@ -206,57 +206,84 @@ impl<'ctx> CodeGen<'ctx> {
             // Handles function return.
             // In functions.rs, MirTerminator::Return
             MirTerminator::Return { values } => {
-                eprintln!("=== Composite cleanup ===");
-                for (k, v) in &self.composite_string_ptrs {
-                    eprintln!("{}: {} strings", k, v.len());
-                }
+                // 1. Free strings in composites (both arrays AND maps)
+                for (_var_name, str_ptrs) in &self.composite_string_ptrs {
+                    for str_ptr in str_ptrs {
+                        let data_ptr = str_ptr.into_pointer_value();
+                        let rc_header = unsafe {
+                            self.builder.build_in_bounds_gep(
+                                self.context.i8_type(),
+                                data_ptr,
+                                &[self.context.i64_type().const_int((-8_i64) as u64, true)],
+                                "rc_header",
+                            )
+                        }
+                        .unwrap();
 
-                // 1. Free strings in composites using actual pointers
-                for (var_name, str_ptrs) in &self.composite_string_ptrs {
-                    if self.symbols.contains_key(var_name) {
-                        for str_ptr in str_ptrs {
-                            let data_ptr = str_ptr.into_pointer_value();
-                            let rc_header = unsafe {
-                                self.builder.build_in_bounds_gep(
-                                    self.context.i8_type(),
-                                    data_ptr,
-                                    &[self.context.i64_type().const_int((-8_i64) as u64, true)],
-                                    "rc_header",
-                                )
-                            }
+                        let decref = self.decref_fn.unwrap();
+                        self.builder
+                            .build_call(decref, &[rc_header.into()], "")
                             .unwrap();
+                    }
+                }
 
-                            let decref = self.decref_fn.unwrap();
-                            self.builder
-                                .build_call(decref, &[rc_header.into()], "")
-                                .unwrap();
+                // Also handle map string tracking
+                for (var_name, str_names) in &self.composite_strings {
+                    if self.heap_maps.contains(var_name) {
+                        for str_name in str_names {
+                            if let Some(val) = self.temp_values.get(str_name) {
+                                if val.is_pointer_value() {
+                                    let data_ptr = val.into_pointer_value();
+                                    let rc_header = unsafe {
+                                        self.builder.build_in_bounds_gep(
+                                            self.context.i8_type(),
+                                            data_ptr,
+                                            &[self
+                                                .context
+                                                .i64_type()
+                                                .const_int((-8_i64) as u64, true)],
+                                            "rc_header",
+                                        )
+                                    }
+                                    .unwrap();
+
+                                    let decref = self.decref_fn.unwrap();
+                                    self.builder
+                                        .build_call(decref, &[rc_header.into()], "")
+                                        .unwrap();
+                                }
+                            }
                         }
                     }
                 }
 
-                // In functions.rs, at the start of MirTerminator::Return
-                eprintln!("=== CLEANUP DEBUG ===");
-                eprintln!(
-                    "composite_string_ptrs size: {}",
-                    self.composite_string_ptrs.len()
-                );
-                for (var_name, ptrs) in &self.composite_string_ptrs {
-                    eprintln!("  {} -> {} strings", var_name, ptrs.len());
+                // 2. Free arrays
+                let mut heap_array_vars: Vec<String> = self
+                    .symbols
+                    .keys()
+                    .filter(|name| self.heap_arrays.contains(*name))
+                    .cloned()
+                    .collect();
+                heap_array_vars.reverse();
+
+                for var_name in heap_array_vars {
+                    self.emit_decref(&var_name);
                 }
 
-                // 1. Free strings in composites
-                for (var_name, str_ptrs) in &self.composite_string_ptrs {
-                    eprintln!("Checking composite: {}", var_name);
-                    if self.symbols.contains_key(var_name) {
-                        eprintln!("  Found in symbols, freeing {} strings", str_ptrs.len());
-                        for str_ptr in str_ptrs {
-                            // ... cleanup code ...
-                        }
-                    } else {
-                        eprintln!("  NOT in symbols!");
-                    }
+                // 3. Free maps
+                let mut heap_map_vars: Vec<String> = self
+                    .symbols
+                    .keys()
+                    .filter(|name| self.heap_maps.contains(*name))
+                    .cloned()
+                    .collect();
+                heap_map_vars.reverse();
+
+                for var_name in heap_map_vars {
+                    self.emit_decref(&var_name);
                 }
-                // 2. Free simple string vars
+
+                // 4. Free simple strings
                 let mut heap_str_vars: Vec<String> = self
                     .symbols
                     .keys()

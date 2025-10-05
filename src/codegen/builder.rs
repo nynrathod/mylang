@@ -92,6 +92,103 @@ impl<'ctx> CodeGen<'ctx> {
                 Some(data_ptr.into())
             }
 
+            MirInstr::Array { name, elements } => {
+                let element_values: Vec<BasicValueEnum<'ctx>> =
+                    elements.iter().map(|el| self.resolve_value(el)).collect();
+
+                if element_values.is_empty() {
+                    panic!("Empty arrays not supported");
+                }
+
+                // Track string pointers
+                let str_ptrs: Vec<BasicValueEnum<'ctx>> = element_values
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| self.heap_strings.contains(&elements[*i]))
+                    .map(|(_, val)| *val)
+                    .collect();
+
+                if !str_ptrs.is_empty() {
+                    self.composite_string_ptrs.insert(name.clone(), str_ptrs);
+                }
+
+                let elem_type = element_values[0].get_type();
+                let array_type = elem_type.array_type(elements.len() as u32);
+
+                // HEAP ALLOCATE with RC header
+                let malloc_fn = self.get_or_declare_malloc();
+                let array_size = array_type.size_of().unwrap();
+                let total_size = self.context.i64_type().const_int(8, false);
+                let total_size = self
+                    .builder
+                    .build_int_add(total_size, array_size, "total_size")
+                    .unwrap();
+
+                let heap_ptr = self
+                    .builder
+                    .build_call(malloc_fn, &[total_size.into()], "heap_array")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_pointer_value();
+
+                // Store RC = 1
+                let i64_ptr = self
+                    .builder
+                    .build_pointer_cast(
+                        heap_ptr,
+                        self.context.i64_type().ptr_type(AddressSpace::default()),
+                        "rc_ptr",
+                    )
+                    .unwrap();
+                self.builder
+                    .build_store(i64_ptr, self.context.i64_type().const_int(1, false))
+                    .unwrap();
+
+                // Get data pointer (after RC header)
+                let data_ptr = unsafe {
+                    self.builder
+                        .build_gep(
+                            self.context.i8_type(),
+                            heap_ptr,
+                            &[self.context.i64_type().const_int(8, false)],
+                            "data_ptr",
+                        )
+                        .unwrap()
+                };
+
+                // Cast to array type pointer
+                let array_ptr = self
+                    .builder
+                    .build_pointer_cast(
+                        data_ptr,
+                        array_type.ptr_type(AddressSpace::default()),
+                        "array_ptr",
+                    )
+                    .unwrap();
+
+                // Store elements
+                for (i, val) in element_values.iter().enumerate() {
+                    let idx = self.context.i32_type().const_int(i as u64, false);
+                    let elem_ptr = unsafe {
+                        self.builder
+                            .build_gep(
+                                array_type,
+                                array_ptr,
+                                &[self.context.i32_type().const_zero(), idx],
+                                &format!("elem_{}", i),
+                            )
+                            .unwrap()
+                    };
+                    self.builder.build_store(elem_ptr, *val).unwrap();
+                }
+
+                self.temp_values.insert(name.clone(), data_ptr.into());
+                self.heap_arrays.insert(name.clone());
+                Some(data_ptr.into())
+            }
+
             MirInstr::Map { name, entries } => {
                 if entries.is_empty() {
                     panic!("Empty maps not supported");
@@ -120,10 +217,57 @@ impl<'ctx> CodeGen<'ctx> {
                 let pair_type = self.context.struct_type(&[key_type, val_type], false);
                 let map_type = pair_type.array_type(entries.len() as u32);
 
-                let map_alloca = self
+                // HEAP ALLOCATE with RC header
+                let malloc_fn = self.get_or_declare_malloc();
+                let map_size = map_type.size_of().unwrap();
+                let total_size = self.context.i64_type().const_int(8, false);
+                let total_size = self
                     .builder
-                    .build_alloca(map_type, name)
-                    .expect("Failed to allocate map");
+                    .build_int_add(total_size, map_size, "total_size")
+                    .unwrap();
+
+                let heap_ptr = self
+                    .builder
+                    .build_call(malloc_fn, &[total_size.into()], "heap_map")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_pointer_value();
+
+                // Store RC = 1
+                let i64_ptr = self
+                    .builder
+                    .build_pointer_cast(
+                        heap_ptr,
+                        self.context.i64_type().ptr_type(AddressSpace::default()),
+                        "rc_ptr",
+                    )
+                    .unwrap();
+                self.builder
+                    .build_store(i64_ptr, self.context.i64_type().const_int(1, false))
+                    .unwrap();
+
+                // Get data pointer
+                let data_ptr = unsafe {
+                    self.builder
+                        .build_gep(
+                            self.context.i8_type(),
+                            heap_ptr,
+                            &[self.context.i64_type().const_int(8, false)],
+                            "data_ptr",
+                        )
+                        .unwrap()
+                };
+
+                let map_ptr = self
+                    .builder
+                    .build_pointer_cast(
+                        data_ptr,
+                        map_type.ptr_type(AddressSpace::default()),
+                        "map_ptr",
+                    )
+                    .unwrap();
 
                 for (i, (k, v)) in entries.iter().enumerate() {
                     let key_val = self.resolve_value(k);
@@ -134,7 +278,7 @@ impl<'ctx> CodeGen<'ctx> {
                         self.builder
                             .build_gep(
                                 map_type,
-                                map_alloca,
+                                map_ptr,
                                 &[self.context.i32_type().const_zero(), idx],
                                 &format!("pair_{}", i),
                             )
@@ -154,8 +298,9 @@ impl<'ctx> CodeGen<'ctx> {
                     self.builder.build_store(val_ptr, val_val).unwrap();
                 }
 
-                self.temp_values.insert(name.clone(), map_alloca.into());
-                Some(map_alloca.into())
+                self.temp_values.insert(name.clone(), data_ptr.into());
+                self.heap_maps.insert(name.clone());
+                Some(data_ptr.into())
             }
 
             // Handles binary operations (add, sub, mul, div, etc.) on integer values.
@@ -188,53 +333,6 @@ impl<'ctx> CodeGen<'ctx> {
                 Some(res.into())
             }
 
-            MirInstr::Array { name, elements } => {
-                // ← elements is HERE in the pattern
-                let element_values: Vec<BasicValueEnum<'ctx>> =
-                    elements.iter().map(|el| self.resolve_value(el)).collect();
-
-                if element_values.is_empty() {
-                    panic!("Empty arrays not supported");
-                }
-
-                // Track ACTUAL string pointers (now elements is in scope)
-                let str_ptrs: Vec<BasicValueEnum<'ctx>> = element_values
-                    .iter()
-                    .enumerate()
-                    .filter(|(i, _)| self.heap_strings.contains(&elements[*i]))
-                    .map(|(_, val)| *val)
-                    .collect();
-
-                if !str_ptrs.is_empty() {
-                    self.composite_string_ptrs.insert(name.clone(), str_ptrs);
-                }
-
-                let elem_type = element_values[0].get_type();
-                let array_type = elem_type.array_type(elements.len() as u32);
-
-                let array_alloca = self
-                    .builder
-                    .build_alloca(array_type, name)
-                    .expect("Failed to allocate array");
-
-                for (i, val) in element_values.iter().enumerate() {
-                    let idx = self.context.i32_type().const_int(i as u64, false);
-                    let elem_ptr = unsafe {
-                        self.builder
-                            .build_gep(
-                                array_type,
-                                array_alloca,
-                                &[self.context.i32_type().const_zero(), idx],
-                                &format!("elem_{}", i),
-                            )
-                            .unwrap()
-                    };
-                    self.builder.build_store(elem_ptr, *val).unwrap();
-                }
-
-                self.temp_values.insert(name.clone(), array_alloca.into());
-                Some(array_alloca.into())
-            }
             // Handles variable assignment or re-assignment.
             MirInstr::Assign {
                 name,
@@ -243,26 +341,63 @@ impl<'ctx> CodeGen<'ctx> {
             } => {
                 let val = self.resolve_value(value);
 
-                // Determine if the source value is a heap string
+                // Check what type of heap value this is
                 let value_is_heap_str = self.heap_strings.contains(value);
+                let value_is_heap_array = self.heap_arrays.contains(value);
+                let value_is_heap_map = self.heap_maps.contains(value);
+
                 if let Some(ptrs) = self.composite_string_ptrs.remove(value) {
                     self.composite_string_ptrs.insert(name.clone(), ptrs);
                 }
+
                 if let Some(sym) = self.symbols.get(name) {
-                    // Re-assignment: check if OLD value needs decref
+                    // Re-assignment: decref old value
                     let name_was_heap_str = self.heap_strings.contains(name);
-                    if name_was_heap_str {
+                    let name_was_heap_array = self.heap_arrays.contains(name);
+                    let name_was_heap_map = self.heap_maps.contains(name);
+
+                    if name_was_heap_array || name_was_heap_map {
+                        if let Some(old_str_ptrs) = self.composite_string_ptrs.get(name) {
+                            for str_ptr in old_str_ptrs {
+                                let data_ptr = str_ptr.into_pointer_value();
+                                let rc_header = unsafe {
+                                    self.builder.build_in_bounds_gep(
+                                        self.context.i8_type(),
+                                        data_ptr,
+                                        &[self.context.i64_type().const_int((-8_i64) as u64, true)],
+                                        "rc_header",
+                                    )
+                                }
+                                .unwrap();
+
+                                let decref = self.decref_fn.unwrap();
+                                self.builder
+                                    .build_call(decref, &[rc_header.into()], "")
+                                    .unwrap();
+                            }
+                        }
+                    }
+
+                    if name_was_heap_str || name_was_heap_array || name_was_heap_map {
                         self.emit_decref(name);
                     }
 
                     self.builder.build_store(sym.ptr, val).unwrap();
 
                     // Update tracking
+                    self.heap_strings.remove(name);
+                    self.heap_arrays.remove(name);
+                    self.heap_maps.remove(name);
+
                     if value_is_heap_str {
                         self.heap_strings.insert(name.clone());
-                        self.emit_incref(name); // Incref the new value
-                    } else {
-                        self.heap_strings.remove(name);
+                        self.emit_incref(name);
+                    } else if value_is_heap_array {
+                        self.heap_arrays.insert(name.clone());
+                        self.emit_incref(name);
+                    } else if value_is_heap_map {
+                        self.heap_maps.insert(name.clone());
+                        self.emit_incref(name);
                     }
                 } else {
                     // Initial assignment
@@ -279,7 +414,16 @@ impl<'ctx> CodeGen<'ctx> {
 
                     if value_is_heap_str {
                         self.heap_strings.insert(name.clone());
-                        // Only incref if copying from another variable (not initial creation)
+                        if self.symbols.contains_key(value) {
+                            self.emit_incref(name);
+                        }
+                    } else if value_is_heap_array {
+                        self.heap_arrays.insert(name.clone());
+                        if self.symbols.contains_key(value) {
+                            self.emit_incref(name);
+                        }
+                    } else if value_is_heap_map {
+                        self.heap_maps.insert(name.clone());
                         if self.symbols.contains_key(value) {
                             self.emit_incref(name);
                         }

@@ -40,6 +40,9 @@ pub struct CodeGen<'ctx> {
 
     pub heap_strings: std::collections::HashSet<String>,
 
+    pub heap_arrays: std::collections::HashSet<String>,
+    pub heap_maps: std::collections::HashSet<String>,
+
     pub composite_strings: HashMap<String, Vec<String>>,
     pub composite_string_ptrs: HashMap<String, Vec<BasicValueEnum<'ctx>>>,
 }
@@ -66,6 +69,9 @@ impl<'ctx> CodeGen<'ctx> {
             decref_fn: None,
 
             heap_strings: std::collections::HashSet::new(),
+
+            heap_arrays: std::collections::HashSet::new(),
+            heap_maps: std::collections::HashSet::new(),
 
             composite_strings: HashMap::new(),
 
