@@ -7,6 +7,9 @@ use std::collections::HashMap;
 impl<'ctx> CodeGen<'ctx> {
     /// The main entry point for code generation. Processes the entire MIR program.
     pub fn generate_program(&mut self, program: &MirProgram) {
+        // Initialize RC runtime FIRST
+        self.init_rc_runtime();
+
         // Store the global instructions for later use (e.g., initialization).
         self.globals = program.globals.clone();
 
@@ -78,11 +81,12 @@ impl<'ctx> CodeGen<'ctx> {
         }
 
         // Set the builder position to the function's entry block.
-        let entry = bb_map
-            .get("entry")
-            .cloned()
-            .unwrap_or_else(|| self.context.append_basic_block(llvm_func, "entry"));
-        self.builder.position_at_end(entry);
+        // Start with the first block from MIR (Block0, entry, etc.)
+        if let Some(first_block) = func.blocks.first() {
+            if let Some(bb) = bb_map.get(&first_block.label) {
+                self.builder.position_at_end(*bb);
+            }
+        }
 
         // Allocate space for parameters and store their incoming values.
         for (i, param) in func.params.iter().enumerate() {
@@ -200,14 +204,77 @@ impl<'ctx> CodeGen<'ctx> {
     ) {
         match term {
             // Handles function return.
+            // In functions.rs, MirTerminator::Return
             MirTerminator::Return { values } => {
+                eprintln!("=== Composite cleanup ===");
+                for (k, v) in &self.composite_string_ptrs {
+                    eprintln!("{}: {} strings", k, v.len());
+                }
+
+                // 1. Free strings in composites using actual pointers
+                for (var_name, str_ptrs) in &self.composite_string_ptrs {
+                    if self.symbols.contains_key(var_name) {
+                        for str_ptr in str_ptrs {
+                            let data_ptr = str_ptr.into_pointer_value();
+                            let rc_header = unsafe {
+                                self.builder.build_in_bounds_gep(
+                                    self.context.i8_type(),
+                                    data_ptr,
+                                    &[self.context.i64_type().const_int((-8_i64) as u64, true)],
+                                    "rc_header",
+                                )
+                            }
+                            .unwrap();
+
+                            let decref = self.decref_fn.unwrap();
+                            self.builder
+                                .build_call(decref, &[rc_header.into()], "")
+                                .unwrap();
+                        }
+                    }
+                }
+
+                // In functions.rs, at the start of MirTerminator::Return
+                eprintln!("=== CLEANUP DEBUG ===");
+                eprintln!(
+                    "composite_string_ptrs size: {}",
+                    self.composite_string_ptrs.len()
+                );
+                for (var_name, ptrs) in &self.composite_string_ptrs {
+                    eprintln!("  {} -> {} strings", var_name, ptrs.len());
+                }
+
+                // 1. Free strings in composites
+                for (var_name, str_ptrs) in &self.composite_string_ptrs {
+                    eprintln!("Checking composite: {}", var_name);
+                    if self.symbols.contains_key(var_name) {
+                        eprintln!("  Found in symbols, freeing {} strings", str_ptrs.len());
+                        for str_ptr in str_ptrs {
+                            // ... cleanup code ...
+                        }
+                    } else {
+                        eprintln!("  NOT in symbols!");
+                    }
+                }
+                // 2. Free simple string vars
+                let mut heap_str_vars: Vec<String> = self
+                    .symbols
+                    .keys()
+                    .filter(|name| self.heap_strings.contains(*name))
+                    .cloned()
+                    .collect();
+                heap_str_vars.reverse();
+
+                for var_name in heap_str_vars {
+                    self.emit_decref(&var_name);
+                }
+
                 if values.is_empty() {
-                    // Generates `ret void`
-                    self.builder.build_return(None);
+                    let zero = self.context.i32_type().const_int(0, false);
+                    self.builder.build_return(Some(&zero)).unwrap();
                 } else {
-                    // Generates `ret <type> <value>`
-                    let val = self.resolve_value(&values[0]); // Assumes single return value
-                    self.builder.build_return(Some(&val));
+                    let val = self.resolve_value(&values[0]);
+                    self.builder.build_return(Some(&val)).unwrap();
                 }
             }
             // Handles unconditional jump (goto).

@@ -11,6 +11,7 @@ use std::collections::HashMap;
 pub mod builder;
 pub mod functions;
 pub mod globals;
+pub mod rc_runtime;
 
 /// Represents a variable allocated on the stack or in global memory.
 /// Stores the variable's pointer and its LLVM type.
@@ -32,6 +33,15 @@ pub struct CodeGen<'ctx> {
     pub globals: Vec<crate::mir::mir::MirInstr>, // List of Intermediate Representation instructions for global definitions
     pub temp_strings: HashMap<String, String>, // Stores original Rust string values (used during string concatenation/definition)
     pub strings_to_concat: std::collections::HashSet<String>, // Tracks strings that need concatenation logic
+
+    // NEW: RC runtime functions
+    pub incref_fn: Option<FunctionValue<'ctx>>,
+    pub decref_fn: Option<FunctionValue<'ctx>>,
+
+    pub heap_strings: std::collections::HashSet<String>,
+
+    pub composite_strings: HashMap<String, Vec<String>>,
+    pub composite_string_ptrs: HashMap<String, Vec<BasicValueEnum<'ctx>>>,
 }
 
 impl<'ctx> CodeGen<'ctx> {
@@ -51,6 +61,15 @@ impl<'ctx> CodeGen<'ctx> {
             globals: Vec::new(),
             temp_strings: HashMap::new(),
             strings_to_concat: std::collections::HashSet::new(),
+
+            incref_fn: None,
+            decref_fn: None,
+
+            heap_strings: std::collections::HashSet::new(),
+
+            composite_strings: HashMap::new(),
+
+            composite_string_ptrs: HashMap::new(),
         }
     }
 

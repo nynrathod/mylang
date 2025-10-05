@@ -1,7 +1,9 @@
 use crate::codegen::{CodeGen, Symbol};
 use crate::mir::MirInstr;
+use inkwell::types::BasicType;
 use inkwell::types::BasicTypeEnum;
 use inkwell::values::BasicValueEnum;
+use inkwell::AddressSpace;
 
 impl<'ctx> CodeGen<'ctx> {
     /// Generates LLVM IR for a single Intermediate Representation (MIR) instruction.
@@ -12,26 +14,152 @@ impl<'ctx> CodeGen<'ctx> {
             MirInstr::ConstInt { name, value } => {
                 let val = self.context.i32_type().const_int(*value as u64, true);
                 // Returns the constant value; storage (if needed) is handled by MirInstr::Assign.
+                self.temp_values.insert(name.clone(), val.into());
                 Some(val.into())
             }
 
-            MirInstr::ConstBool { value, .. } => Some(
-                self.context
-                    .bool_type()
-                    .const_int(*value as u64, false)
-                    .into(),
-            ),
+            MirInstr::ConstBool { name, value } => {
+                let val = self.context.bool_type().const_int(*value as u64, false);
+                // STORE IT
+                self.temp_values.insert(name.clone(), val.into());
+                Some(val.into())
+            }
 
-            MirInstr::ConstString { value, .. } => {
-                let s = self
+            MirInstr::ConstString { name, value } => {
+                let malloc_fn = self.get_or_declare_malloc();
+                let total_size = 8 + value.len() + 1;
+                let size_val = self.context.i64_type().const_int(total_size as u64, false);
+
+                let heap_ptr = self
                     .builder
-                    .build_global_string_ptr(value, "str_tmp")
-                    .expect("Failed to create global string");
-                Some(s.as_pointer_value().into())
+                    .build_call(malloc_fn, &[size_val.into()], "heap_str")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_pointer_value();
+
+                let i64_ptr = self
+                    .builder
+                    .build_pointer_cast(
+                        heap_ptr,
+                        self.context.i64_type().ptr_type(AddressSpace::default()),
+                        "rc_ptr",
+                    )
+                    .unwrap();
+                self.builder
+                    .build_store(i64_ptr, self.context.i64_type().const_int(1, false))
+                    .unwrap();
+
+                let data_ptr = unsafe {
+                    self.builder
+                        .build_gep(
+                            self.context.i8_type(),
+                            heap_ptr,
+                            &[self.context.i64_type().const_int(8, false)],
+                            "data_ptr",
+                        )
+                        .unwrap()
+                };
+
+                let str_global = self
+                    .builder
+                    .build_global_string_ptr(value, "str_const")
+                    .expect("Failed to create string");
+
+                let memcpy = self.get_or_declare_memcpy();
+                let len = self
+                    .context
+                    .i64_type()
+                    .const_int((value.len() + 1) as u64, false);
+                self.builder
+                    .build_call(
+                        memcpy,
+                        &[
+                            data_ptr.into(),
+                            str_global.as_pointer_value().into(),
+                            len.into(),
+                            self.context.bool_type().const_zero().into(),
+                        ],
+                        "",
+                    )
+                    .unwrap();
+
+                // CRITICAL: Store BOTH in temp_values
+                self.temp_values.insert(name.clone(), data_ptr.into());
+                self.heap_strings.insert(name.clone()); // Mark as heap string
+
+                Some(data_ptr.into())
+            }
+
+            MirInstr::Map { name, entries } => {
+                if entries.is_empty() {
+                    panic!("Empty maps not supported");
+                }
+
+                // Track string keys and values
+                let mut str_temps = Vec::new();
+                for (k, v) in entries {
+                    if self.heap_strings.contains(k) {
+                        str_temps.push(k.clone());
+                    }
+                    if self.heap_strings.contains(v) {
+                        str_temps.push(v.clone());
+                    }
+                }
+
+                if !str_temps.is_empty() {
+                    self.composite_strings.insert(name.clone(), str_temps);
+                }
+
+                let first_key = self.resolve_value(&entries[0].0);
+                let first_val = self.resolve_value(&entries[0].1);
+                let key_type = first_key.get_type();
+                let val_type = first_val.get_type();
+
+                let pair_type = self.context.struct_type(&[key_type, val_type], false);
+                let map_type = pair_type.array_type(entries.len() as u32);
+
+                let map_alloca = self
+                    .builder
+                    .build_alloca(map_type, name)
+                    .expect("Failed to allocate map");
+
+                for (i, (k, v)) in entries.iter().enumerate() {
+                    let key_val = self.resolve_value(k);
+                    let val_val = self.resolve_value(v);
+
+                    let idx = self.context.i32_type().const_int(i as u64, false);
+                    let pair_ptr = unsafe {
+                        self.builder
+                            .build_gep(
+                                map_type,
+                                map_alloca,
+                                &[self.context.i32_type().const_zero(), idx],
+                                &format!("pair_{}", i),
+                            )
+                            .unwrap()
+                    };
+
+                    let key_ptr = self
+                        .builder
+                        .build_struct_gep(pair_type, pair_ptr, 0, "key_ptr")
+                        .unwrap();
+                    self.builder.build_store(key_ptr, key_val).unwrap();
+
+                    let val_ptr = self
+                        .builder
+                        .build_struct_gep(pair_type, pair_ptr, 1, "val_ptr")
+                        .unwrap();
+                    self.builder.build_store(val_ptr, val_val).unwrap();
+                }
+
+                self.temp_values.insert(name.clone(), map_alloca.into());
+                Some(map_alloca.into())
             }
 
             // Handles binary operations (add, sub, mul, div, etc.) on integer values.
-            MirInstr::BinaryOp(op, _dst, lhs, rhs) => {
+            MirInstr::BinaryOp(op, dst, lhs, rhs) => {
                 // Resolve the values of the left-hand side (lhs) and right-hand side (rhs).
                 let lhs_val = self.resolve_value(lhs).into_int_value();
                 let rhs_val = self.resolve_value(rhs).into_int_value();
@@ -56,33 +184,91 @@ impl<'ctx> CodeGen<'ctx> {
                     _ => panic!("Unsupported binary op: {}", op),
                 };
 
+                self.temp_values.insert(dst.clone(), res.into());
                 Some(res.into())
             }
 
+            MirInstr::Array { name, elements } => {
+                // ← elements is HERE in the pattern
+                let element_values: Vec<BasicValueEnum<'ctx>> =
+                    elements.iter().map(|el| self.resolve_value(el)).collect();
+
+                if element_values.is_empty() {
+                    panic!("Empty arrays not supported");
+                }
+
+                // Track ACTUAL string pointers (now elements is in scope)
+                let str_ptrs: Vec<BasicValueEnum<'ctx>> = element_values
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| self.heap_strings.contains(&elements[*i]))
+                    .map(|(_, val)| *val)
+                    .collect();
+
+                if !str_ptrs.is_empty() {
+                    self.composite_string_ptrs.insert(name.clone(), str_ptrs);
+                }
+
+                let elem_type = element_values[0].get_type();
+                let array_type = elem_type.array_type(elements.len() as u32);
+
+                let array_alloca = self
+                    .builder
+                    .build_alloca(array_type, name)
+                    .expect("Failed to allocate array");
+
+                for (i, val) in element_values.iter().enumerate() {
+                    let idx = self.context.i32_type().const_int(i as u64, false);
+                    let elem_ptr = unsafe {
+                        self.builder
+                            .build_gep(
+                                array_type,
+                                array_alloca,
+                                &[self.context.i32_type().const_zero(), idx],
+                                &format!("elem_{}", i),
+                            )
+                            .unwrap()
+                    };
+                    self.builder.build_store(elem_ptr, *val).unwrap();
+                }
+
+                self.temp_values.insert(name.clone(), array_alloca.into());
+                Some(array_alloca.into())
+            }
             // Handles variable assignment or re-assignment.
             MirInstr::Assign {
                 name,
                 value,
                 mutable: _,
             } => {
-                // Resolve the value (could be a literal, a temp, or result of an operation)
                 let val = self.resolve_value(value);
 
-                // Check if the variable already exists in the symbol table (re-assignment)
+                // Determine if the source value is a heap string
+                let value_is_heap_str = self.heap_strings.contains(value);
+                if let Some(ptrs) = self.composite_string_ptrs.remove(value) {
+                    self.composite_string_ptrs.insert(name.clone(), ptrs);
+                }
                 if let Some(sym) = self.symbols.get(name) {
-                    // Re-assignment: use build_store to write the new value to the existing memory location
+                    // Re-assignment: check if OLD value needs decref
+                    let name_was_heap_str = self.heap_strings.contains(name);
+                    if name_was_heap_str {
+                        self.emit_decref(name);
+                    }
+
                     self.builder.build_store(sym.ptr, val).unwrap();
+
+                    // Update tracking
+                    if value_is_heap_str {
+                        self.heap_strings.insert(name.clone());
+                        self.emit_incref(name); // Incref the new value
+                    } else {
+                        self.heap_strings.remove(name);
+                    }
                 } else {
-                    // Declaration: allocate new memory on the stack (build_alloca)
-                    let alloca = self
-                        .builder
-                        .build_alloca(val.get_type(), name)
-                        .expect("Failed to allocate memory for assignment");
+                    // Initial assignment
+                    let alloca = self.builder.build_alloca(val.get_type(), name).unwrap();
+                    self.builder.build_store(alloca, val).unwrap();
 
-                    // Store the resolved value into the newly allocated memory
-                    self.builder.build_store(alloca, val);
-
-                    // Register the new symbol (name, pointer, type) in the symbol table
                     self.symbols.insert(
                         name.clone(),
                         Symbol {
@@ -90,9 +276,28 @@ impl<'ctx> CodeGen<'ctx> {
                             ty: val.get_type(),
                         },
                     );
+
+                    if value_is_heap_str {
+                        self.heap_strings.insert(name.clone());
+                        // Only incref if copying from another variable (not initial creation)
+                        if self.symbols.contains_key(value) {
+                            self.emit_incref(name);
+                        }
+                    }
                 }
                 Some(val)
             }
+
+            MirInstr::IncRef { value } => {
+                self.emit_incref(value);
+                None
+            }
+
+            MirInstr::DecRef { value } => {
+                self.emit_decref(value);
+                None
+            }
+
             _ => None, // Unhandled instruction
         }
     }
@@ -100,31 +305,37 @@ impl<'ctx> CodeGen<'ctx> {
     /// Resolves a variable name or literal string into its corresponding LLVM value.
     /// This is crucial for evaluating expressions.
     pub fn resolve_value(&self, name: &str) -> BasicValueEnum<'ctx> {
-        //  Check for temporary constant values (e.g., results of global constant expression building)
+        // Check temp values first
         if let Some(val) = self.temp_values.get(name) {
             return *val;
         }
 
-        // Check the symbol table for local variables (build_load the value from its pointer)
+        // Check symbols
         if let Some(sym) = self.symbols.get(name) {
-            // Load the value stored at the memory address
-            self.builder
+            return self
+                .builder
                 .build_load(sym.ty, sym.ptr, name)
-                .expect("Failed to load value")
-        // Check for immediate literals (integers, booleans)
-        } else if let Ok(val) = name.parse::<i32>() {
-            // Constant integer literal
-            self.context.i32_type().const_int(val as u64, true).into()
-        } else if name == "true" {
-            // Constant boolean literal (1)
-            self.context.bool_type().const_int(1, false).into()
-        } else if name == "false" {
-            // Constant boolean literal (0)
-            self.context.bool_type().const_int(0, false).into()
-        } else {
-            // If the name is not found anywhere, it's an error.
-            panic!("Unknown variable or literal: {}", name);
+                .expect("Failed to load value");
         }
+
+        // Handle literals
+        if let Ok(val) = name.parse::<i32>() {
+            return self.context.i32_type().const_int(val as u64, true).into();
+        }
+        if name == "true" {
+            return self.context.bool_type().const_int(1, false).into();
+        }
+        if name == "false" {
+            return self.context.bool_type().const_int(0, false).into();
+        }
+
+        // Better error message
+        eprintln!("Available temps: {:?}", self.temp_values.keys());
+        eprintln!("Available symbols: {:?}", self.symbols.keys());
+        panic!(
+            "Unknown variable or literal: {} - check your MIR generation",
+            name
+        );
     }
 
     /// Converts a compiler-specific type name (e.g., "Int", "Str") to its corresponding LLVM type.

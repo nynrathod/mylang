@@ -39,19 +39,17 @@ impl<'ctx> CodeGen<'ctx> {
                 self.temp_values.insert(name.clone(), val.into());
             }
             MirInstr::ConstString { name, value } => {
+                // For global strings, just create static constant (no RC)
+                // RC will be handled in functions, not globals
                 if self.strings_to_concat.contains(name) {
-                    // If the string is part of a concatenation, save its raw text temporarily.
                     self.temp_strings.insert(name.clone(), value.clone());
                 } else {
-                    // Otherwise, define it as a global constant array of i8 (char).
                     let s = self.module.add_global(
-                        self.context.i8_type().array_type(value.len() as u32 + 1), // +1 for null terminator
+                        self.context.i8_type().array_type(value.len() as u32 + 1),
                         None,
                         name,
                     );
-                    // Initialize the global with the string data.
                     s.set_initializer(&self.context.const_string(value.as_bytes(), true));
-                    // Store its pointer in temp_values for lookups.
                     self.temp_values
                         .insert(name.clone(), s.as_pointer_value().into());
                 }
@@ -224,6 +222,14 @@ impl<'ctx> CodeGen<'ctx> {
         // Look up results of previous global instructions
         if let Some(val) = self.temp_values.get(name) {
             return *val;
+        }
+
+        // Check if it's a previously defined global variable in symbols
+        if let Some(symbol) = self.symbols.get(name) {
+            let global = unsafe { inkwell::values::GlobalValue::new(symbol.ptr.as_value_ref()) };
+            if let Some(initializer) = global.get_initializer() {
+                return initializer;
+            }
         }
 
         // Handle immediate literal values (integers, booleans).
