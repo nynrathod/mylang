@@ -21,6 +21,32 @@ pub struct Symbol<'ctx> {
     pub ty: BasicTypeEnum<'ctx>,
 }
 
+/// Metadata for tracking array information
+#[derive(Debug, Clone)]
+pub struct ArrayMetadata {
+    pub length: usize,
+    pub element_type: String, // "Int", "Str", etc.
+    pub contains_strings: bool,
+}
+
+/// Metadata for tracking map information
+#[derive(Debug, Clone)]
+pub struct MapMetadata {
+    pub length: usize,
+    pub key_type: String,
+    pub value_type: String,
+    pub key_is_string: bool,
+    pub value_is_string: bool,
+}
+
+/// Loop context for tracking nested loops
+#[derive(Debug, Clone)]
+pub struct LoopContext {
+    pub exit_block: String,
+    pub continue_block: String,
+    pub loop_vars: Vec<String>,
+}
+
 /// The main context structure for generating LLVM Intermediate Representation (IR).
 /// It holds all the necessary LLVM components and symbol tables.
 pub struct CodeGen<'ctx> {
@@ -45,6 +71,10 @@ pub struct CodeGen<'ctx> {
 
     pub composite_strings: HashMap<String, Vec<String>>,
     pub composite_string_ptrs: HashMap<String, Vec<BasicValueEnum<'ctx>>>,
+
+    pub array_metadata: HashMap<String, ArrayMetadata>,
+    pub map_metadata: HashMap<String, MapMetadata>,
+    pub loop_stack: Vec<LoopContext>,
 }
 
 impl<'ctx> CodeGen<'ctx> {
@@ -76,11 +106,36 @@ impl<'ctx> CodeGen<'ctx> {
             composite_strings: HashMap::new(),
 
             composite_string_ptrs: HashMap::new(),
+
+            array_metadata: HashMap::new(),
+            map_metadata: HashMap::new(),
+            loop_stack: Vec::new(),
         }
     }
 
     /// Prints the final generated LLVM IR to standard error (stderr).
     pub fn dump(&self) {
         self.module.print_to_stderr();
+    }
+
+    /// Enter a new loop context
+    pub fn enter_loop(&mut self, exit_block: String, continue_block: String) {
+        self.loop_stack.push(LoopContext {
+            exit_block,
+            continue_block,
+            loop_vars: Vec::new(),
+        });
+    }
+
+    /// Exit current loop context and return it
+    pub fn exit_loop(&mut self) -> Option<LoopContext> {
+        self.loop_stack.pop()
+    }
+
+    /// Add a variable to current loop's cleanup list
+    pub fn add_loop_var(&mut self, var: String) {
+        if let Some(ctx) = self.loop_stack.last_mut() {
+            ctx.loop_vars.push(var);
+        }
     }
 }

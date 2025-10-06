@@ -93,15 +93,8 @@ impl<'ctx> CodeGen<'ctx> {
                 Some(data_ptr.into())
             }
 
-            MirInstr::Array { name, elements } => {
-                // Use the new metadata-tracking version
-                self.generate_array_with_metadata(name, elements)
-            }
-
-            MirInstr::Map { name, entries } => {
-                // Use the new metadata-tracking version
-                self.generate_map_with_metadata(name, entries)
-            }
+            MirInstr::Array { name, elements } => self.generate_array_with_metadata(name, elements),
+            MirInstr::Map { name, entries } => self.generate_map_with_metadata(name, entries),
 
             // ===== LOOP INSTRUCTIONS =====
             MirInstr::ForRange { .. }
@@ -553,6 +546,278 @@ impl<'ctx> CodeGen<'ctx> {
                 .into(),
             _ => self.context.i32_type().into(),
         }
+    }
+
+    pub fn generate_array_with_metadata(
+        &mut self,
+        name: &str,
+        elements: &[String],
+    ) -> Option<BasicValueEnum<'ctx>> {
+        let element_values: Vec<BasicValueEnum<'ctx>> =
+            elements.iter().map(|el| self.resolve_value(el)).collect();
+
+        if element_values.is_empty() {
+            panic!("Empty arrays not supported");
+        }
+
+        let elem_type = element_values[0].get_type();
+        let array_type = elem_type.array_type(elements.len() as u32);
+
+        // Track string pointers
+        let str_ptrs: Vec<BasicValueEnum<'ctx>> = element_values
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| self.heap_strings.contains(&elements[*i]))
+            .map(|(_, val)| *val)
+            .collect();
+
+        let contains_strings = !str_ptrs.is_empty();
+
+        if contains_strings {
+            self.composite_string_ptrs
+                .insert(name.to_string(), str_ptrs);
+        }
+
+        // Store metadata
+        let element_type_name = if elem_type.is_int_type() {
+            "Int"
+        } else if elem_type.is_pointer_type() {
+            "Str"
+        } else {
+            "Unknown"
+        };
+
+        self.array_metadata.insert(
+            name.to_string(),
+            crate::codegen::ArrayMetadata {
+                length: elements.len(),
+                element_type: element_type_name.to_string(),
+                contains_strings,
+            },
+        );
+
+        // HEAP ALLOCATE with RC header
+        let malloc_fn = self.get_or_declare_malloc();
+        let array_size = array_type.size_of().unwrap();
+        let total_size = self.context.i64_type().const_int(8, false);
+        let total_size = self
+            .builder
+            .build_int_add(total_size, array_size, "total_size")
+            .unwrap();
+
+        let heap_ptr = self
+            .builder
+            .build_call(malloc_fn, &[total_size.into()], "heap_array")
+            .unwrap()
+            .try_as_basic_value()
+            .left()
+            .unwrap()
+            .into_pointer_value();
+
+        // Store RC = 1
+        let i64_ptr = self
+            .builder
+            .build_pointer_cast(
+                heap_ptr,
+                self.context.i64_type().ptr_type(AddressSpace::default()),
+                "rc_ptr",
+            )
+            .unwrap();
+        self.builder
+            .build_store(i64_ptr, self.context.i64_type().const_int(1, false))
+            .unwrap();
+
+        // Get data pointer
+        let data_ptr = unsafe {
+            self.builder
+                .build_gep(
+                    self.context.i8_type(),
+                    heap_ptr,
+                    &[self.context.i64_type().const_int(8, false)],
+                    "data_ptr",
+                )
+                .unwrap()
+        };
+
+        // Cast to array type pointer
+        let array_ptr = self
+            .builder
+            .build_pointer_cast(
+                data_ptr,
+                array_type.ptr_type(AddressSpace::default()),
+                "array_ptr",
+            )
+            .unwrap();
+
+        // Store elements
+        for (i, val) in element_values.iter().enumerate() {
+            let idx = self.context.i32_type().const_int(i as u64, false);
+            let elem_ptr = unsafe {
+                self.builder
+                    .build_gep(
+                        array_type,
+                        array_ptr,
+                        &[self.context.i32_type().const_zero(), idx],
+                        &format!("elem_{}", i),
+                    )
+                    .unwrap()
+            };
+            self.builder.build_store(elem_ptr, *val).unwrap();
+        }
+
+        self.temp_values.insert(name.to_string(), data_ptr.into());
+        self.heap_arrays.insert(name.to_string());
+        Some(data_ptr.into())
+    }
+
+    pub fn generate_map_with_metadata(
+        &mut self,
+        name: &str,
+        entries: &[(String, String)],
+    ) -> Option<BasicValueEnum<'ctx>> {
+        if entries.is_empty() {
+            panic!("Empty maps not supported");
+        }
+
+        // Track string keys and values
+        let mut str_temps = Vec::new();
+        let mut key_is_string = false;
+        let mut value_is_string = false;
+
+        for (k, v) in entries {
+            if self.heap_strings.contains(k) {
+                str_temps.push(k.clone());
+                key_is_string = true;
+            }
+            if self.heap_strings.contains(v) {
+                str_temps.push(v.clone());
+                value_is_string = true;
+            }
+        }
+
+        if !str_temps.is_empty() {
+            self.composite_strings.insert(name.to_string(), str_temps);
+        }
+
+        let first_key = self.resolve_value(&entries[0].0);
+        let first_val = self.resolve_value(&entries[0].1);
+        let key_type = first_key.get_type();
+        let val_type = first_val.get_type();
+
+        let key_type_name = if key_type.is_int_type() {
+            "Int"
+        } else if key_type.is_pointer_type() {
+            "Str"
+        } else {
+            "Unknown"
+        };
+
+        let val_type_name = if val_type.is_int_type() {
+            "Int"
+        } else if val_type.is_pointer_type() {
+            "Str"
+        } else {
+            "Unknown"
+        };
+
+        self.map_metadata.insert(
+            name.to_string(),
+            crate::codegen::MapMetadata {
+                length: entries.len(),
+                key_type: key_type_name.to_string(),
+                value_type: val_type_name.to_string(),
+                key_is_string,
+                value_is_string,
+            },
+        );
+
+        let pair_type = self.context.struct_type(&[key_type, val_type], false);
+        let map_type = pair_type.array_type(entries.len() as u32);
+
+        // HEAP ALLOCATE with RC header
+        let malloc_fn = self.get_or_declare_malloc();
+        let map_size = map_type.size_of().unwrap();
+        let total_size = self.context.i64_type().const_int(8, false);
+        let total_size = self
+            .builder
+            .build_int_add(total_size, map_size, "total_size")
+            .unwrap();
+
+        let heap_ptr = self
+            .builder
+            .build_call(malloc_fn, &[total_size.into()], "heap_map")
+            .unwrap()
+            .try_as_basic_value()
+            .left()
+            .unwrap()
+            .into_pointer_value();
+
+        // Store RC = 1
+        let i64_ptr = self
+            .builder
+            .build_pointer_cast(
+                heap_ptr,
+                self.context.i64_type().ptr_type(AddressSpace::default()),
+                "rc_ptr",
+            )
+            .unwrap();
+        self.builder
+            .build_store(i64_ptr, self.context.i64_type().const_int(1, false))
+            .unwrap();
+
+        // Get data pointer
+        let data_ptr = unsafe {
+            self.builder
+                .build_gep(
+                    self.context.i8_type(),
+                    heap_ptr,
+                    &[self.context.i64_type().const_int(8, false)],
+                    "data_ptr",
+                )
+                .unwrap()
+        };
+
+        let map_ptr = self
+            .builder
+            .build_pointer_cast(
+                data_ptr,
+                map_type.ptr_type(AddressSpace::default()),
+                "map_ptr",
+            )
+            .unwrap();
+
+        for (i, (k, v)) in entries.iter().enumerate() {
+            let key_val = self.resolve_value(k);
+            let val_val = self.resolve_value(v);
+
+            let idx = self.context.i32_type().const_int(i as u64, false);
+            let pair_ptr = unsafe {
+                self.builder
+                    .build_gep(
+                        map_type,
+                        map_ptr,
+                        &[self.context.i32_type().const_zero(), idx],
+                        &format!("pair_{}", i),
+                    )
+                    .unwrap()
+            };
+
+            let key_ptr = self
+                .builder
+                .build_struct_gep(pair_type, pair_ptr, 0, "key_ptr")
+                .unwrap();
+            self.builder.build_store(key_ptr, key_val).unwrap();
+
+            let val_ptr = self
+                .builder
+                .build_struct_gep(pair_type, pair_ptr, 1, "val_ptr")
+                .unwrap();
+            self.builder.build_store(val_ptr, val_val).unwrap();
+        }
+
+        self.temp_values.insert(name.to_string(), data_ptr.into());
+        self.heap_maps.insert(name.to_string());
+        Some(data_ptr.into())
     }
 
     pub fn generate_for_loop(
