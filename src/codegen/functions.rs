@@ -1,6 +1,7 @@
 use crate::codegen::CodeGen;
 use crate::mir::mir::{CodegenBlock, MirBlock, MirFunction, MirInstr, MirProgram, MirTerminator};
 use inkwell::types::BasicType;
+use inkwell::types::StructType;
 use inkwell::values::FunctionValue;
 use std::collections::HashMap;
 
@@ -167,13 +168,195 @@ impl<'ctx> CodeGen<'ctx> {
         let bb = bb_map.get(&block.label).unwrap();
         self.builder.position_at_end(*bb);
 
+        // Track if this is a loop body and what kind
+        let mut loop_increment_var: Option<String> = None;
+        let mut loop_cond_block: Option<String> = None;
+        let mut is_range_loop = false;
+        let mut is_array_loop = false;
+        let mut is_map_loop = false;
+        let mut array_name: Option<String> = None;
+        let mut index_var: Option<String> = None;
+        let mut item_var: Option<String> = None;
+        let mut map_name: Option<String> = None;
+        let mut key_var: Option<String> = None;
+        let mut val_var: Option<String> = None;
+
+        // Scan for loop markers
         for instr in &block.instrs {
-            self.generate_instr(instr);
+            match instr {
+                MirInstr::LoopBodyMarker {
+                    var, cond_block, ..
+                } => {
+                    is_range_loop = true;
+                    loop_increment_var = Some(var.clone());
+                    loop_cond_block = Some(cond_block.clone());
+                }
+                MirInstr::ArrayLoopMarker {
+                    array,
+                    index,
+                    item,
+                    cond_block,
+                } => {
+                    is_array_loop = true;
+                    array_name = Some(array.clone());
+                    index_var = Some(index.clone());
+                    item_var = Some(item.clone());
+                    loop_cond_block = Some(cond_block.clone());
+                }
+                MirInstr::MapLoopMarker {
+                    map,
+                    index,
+                    key,
+                    value,
+                    cond_block,
+                } => {
+                    is_map_loop = true;
+                    map_name = Some(map.clone());
+                    index_var = Some(index.clone());
+                    key_var = Some(key.clone());
+                    val_var = Some(value.clone());
+                    loop_cond_block = Some(cond_block.clone());
+                }
+                _ => {}
+            }
         }
 
+        // Process instructions
+        for instr in &block.instrs {
+            match instr {
+                // Skip marker instructions
+                MirInstr::LoopBodyMarker { .. }
+                | MirInstr::ArrayLoopMarker { .. }
+                | MirInstr::MapLoopMarker { .. } => continue,
+
+                // Handle loop setup instructions
+                MirInstr::ForRange { .. }
+                | MirInstr::ForArray { .. }
+                | MirInstr::ForMap { .. }
+                | MirInstr::ForInfinite { .. } => {
+                    self.generate_for_loop(instr, bb_map);
+                }
+
+                // Handle break/continue
+                MirInstr::Break { .. } | MirInstr::Continue { .. } => {
+                    // Clean up loop variables before jumping
+                    if is_array_loop && item_var.is_some() {
+                        let item = item_var.as_ref().unwrap();
+                        if self.heap_strings.contains(item) {
+                            self.emit_decref(item);
+                        }
+                    }
+                    if is_map_loop {
+                        if let Some(key) = &key_var {
+                            if self.heap_strings.contains(key) {
+                                self.emit_decref(key);
+                            }
+                        }
+                        if let Some(val) = &val_var {
+                            if self.heap_strings.contains(val) {
+                                self.emit_decref(val);
+                            }
+                        }
+                    }
+
+                    self.generate_for_loop(instr, bb_map);
+                    return; // These terminate the block
+                }
+
+                // Handle array element loading
+                MirInstr::LoadArrayElement { .. } | MirInstr::LoadMapPair { .. } => {
+                    self.generate_instr(instr);
+                }
+
+                // Regular instructions
+                _ => {
+                    self.generate_instr(instr);
+                }
+            }
+        }
+
+        // After all instructions, handle loop continuation logic
+        if is_range_loop {
+            // Range loop: increment variable and jump to condition
+            if let (Some(var), Some(cond_block)) = (loop_increment_var, loop_cond_block) {
+                let cond_bb = bb_map.get(&cond_block).expect("Condition block not found");
+                self.generate_loop_increment_and_branch(&var, *cond_bb);
+                return; // Don't process terminator
+            }
+        } else if is_array_loop {
+            // Array loop: decref item (if string), increment index, jump to condition
+            if let (Some(item), Some(index), Some(cond_block)) =
+                (item_var, index_var, loop_cond_block)
+            {
+                // Decref the item if it's a string (was incref'd when loaded)
+                if self.heap_strings.contains(&item) {
+                    self.emit_decref(&item);
+                }
+
+                // Increment index
+                if let Some(symbol) = self.symbols.get(&index) {
+                    let current = self
+                        .builder
+                        .build_load(self.context.i32_type(), symbol.ptr, "current_idx")
+                        .unwrap()
+                        .into_int_value();
+
+                    let one = self.context.i32_type().const_int(1, false);
+                    let incremented = self
+                        .builder
+                        .build_int_add(current, one, "incremented_idx")
+                        .unwrap();
+
+                    self.builder.build_store(symbol.ptr, incremented).unwrap();
+                }
+
+                // Jump back to condition
+                let cond_bb = bb_map.get(&cond_block).expect("Condition block not found");
+                self.builder.build_unconditional_branch(*cond_bb).unwrap();
+                return;
+            }
+        } else if is_map_loop {
+            // Map loop: decref key and value (if strings), increment index, jump to condition
+            if let (Some(key), Some(val), Some(index), Some(cond_block)) =
+                (key_var, val_var, index_var, loop_cond_block)
+            {
+                // Decref key if string
+                if self.heap_strings.contains(&key) {
+                    self.emit_decref(&key);
+                }
+
+                // Decref value if string
+                if self.heap_strings.contains(&val) {
+                    self.emit_decref(&val);
+                }
+
+                // Increment index
+                if let Some(symbol) = self.symbols.get(&index) {
+                    let current = self
+                        .builder
+                        .build_load(self.context.i32_type(), symbol.ptr, "current_idx")
+                        .unwrap()
+                        .into_int_value();
+
+                    let one = self.context.i32_type().const_int(1, false);
+                    let incremented = self
+                        .builder
+                        .build_int_add(current, one, "incremented_idx")
+                        .unwrap();
+
+                    self.builder.build_store(symbol.ptr, incremented).unwrap();
+                }
+
+                // Jump back to condition
+                let cond_bb = bb_map.get(&cond_block).expect("Condition block not found");
+                self.builder.build_unconditional_branch(*cond_bb).unwrap();
+                return;
+            }
+        }
+
+        // Handle regular block terminator
         if let Some(instr) = &block.terminator {
             let term = match instr {
-                // ... (Logic to convert MirInstr to MirTerminator, similar to above)
                 MirInstr::Return { values } => MirTerminator::Return {
                     values: values.clone(),
                 },
@@ -189,7 +372,7 @@ impl<'ctx> CodeGen<'ctx> {
                     then_block: then_block.clone(),
                     else_block: else_block.clone(),
                 },
-                _ => panic!("Unexpected instruction in block terminator"),
+                _ => return,
             };
             self.generate_terminator(&term, func, bb_map);
         }
@@ -322,6 +505,220 @@ impl<'ctx> CodeGen<'ctx> {
                 // Generates `br i1 %cond, label %then, label %else`
                 self.builder
                     .build_conditional_branch(cond_val, *then_bb, *else_bb);
+            }
+        }
+    }
+
+    pub fn generate_block_with_loops(
+        &mut self,
+        block: &MirBlock,
+        func: FunctionValue<'ctx>,
+        bb_map: &HashMap<String, inkwell::basic_block::BasicBlock<'ctx>>,
+    ) {
+        let bb = bb_map.get(&block.label).unwrap();
+        self.builder.position_at_end(*bb);
+
+        // Track if this is a loop body block
+        let mut is_loop_body = false;
+        let mut loop_var = None;
+        let mut loop_cond_bb = None;
+        let mut loop_increment_bb = None;
+
+        // Check if any instruction marks this as a loop body
+        for instr in &block.instrs {
+            match instr {
+                MirInstr::LoopBodyMarker {
+                    var,
+                    cond_block,
+                    increment_block,
+                } => {
+                    is_loop_body = true;
+                    loop_var = Some(var.clone());
+                    loop_cond_bb = bb_map.get(cond_block).copied();
+                    loop_increment_bb = bb_map.get(increment_block).copied();
+                }
+                _ => {}
+            }
+        }
+
+        // Generate all instructions
+        for instr in &block.instrs {
+            // Check for loop-related instructions
+            match instr {
+                MirInstr::ForRange { .. }
+                | MirInstr::ForArray { .. }
+                | MirInstr::ForMap { .. }
+                | MirInstr::ForInfinite { .. } => {
+                    self.generate_for_loop(instr, bb_map);
+                }
+
+                MirInstr::LoadArrayElement { dest, array, index } => {
+                    // Load array element with RC handling
+                    let array_ptr = self.resolve_value(array).into_pointer_value();
+                    let index_val = self.resolve_value(index).into_int_value();
+
+                    // Determine if elements are strings
+                    let is_string =
+                        self.heap_strings.contains(array) || self.array_contains_strings(array);
+
+                    let elem_type = self.get_array_element_type(array);
+                    let elem_val =
+                        self.load_array_element_with_rc(array_ptr, index_val, elem_type, is_string);
+
+                    // Store in destination variable
+                    if let Some(symbol) = self.symbols.get(dest) {
+                        self.builder.build_store(symbol.ptr, elem_val).unwrap();
+                    }
+                }
+
+                MirInstr::LoadMapPair {
+                    key_dest,
+                    val_dest,
+                    map,
+                    index,
+                } => {
+                    let map_ptr = self.resolve_value(map).into_pointer_value();
+                    let index_val = self.resolve_value(index).into_int_value();
+
+                    let (key_is_string, val_is_string) = self.map_contains_strings(map);
+                    let pair_type = self.get_map_pair_type(map);
+
+                    let (key_val, val_val) = self.load_map_pair_with_rc(
+                        map_ptr,
+                        index_val,
+                        pair_type,
+                        key_is_string,
+                        val_is_string,
+                    );
+
+                    // Store key and value
+                    if let Some(symbol) = self.symbols.get(key_dest) {
+                        self.builder.build_store(symbol.ptr, key_val).unwrap();
+                    }
+                    if let Some(symbol) = self.symbols.get(val_dest) {
+                        self.builder.build_store(symbol.ptr, val_val).unwrap();
+                    }
+                }
+
+                MirInstr::Break { .. } | MirInstr::Continue { .. } => {
+                    self.generate_for_loop(instr, bb_map);
+                    return; // These terminate the block
+                }
+
+                _ => {
+                    self.generate_instr(instr);
+                }
+            }
+        }
+
+        // If this is a loop body, handle increment and loop back
+        if is_loop_body {
+            if let (Some(var), Some(inc_bb), Some(cond_bb)) =
+                (loop_var, loop_increment_bb, loop_cond_bb)
+            {
+                // Generate increment: var = var + 1
+                if let Some(symbol) = self.symbols.get(&var) {
+                    let current = self
+                        .builder
+                        .build_load(self.context.i32_type(), symbol.ptr, "current")
+                        .unwrap()
+                        .into_int_value();
+
+                    let one = self.context.i32_type().const_int(1, false);
+                    let incremented = self
+                        .builder
+                        .build_int_add(current, one, "incremented")
+                        .unwrap();
+
+                    self.builder.build_store(symbol.ptr, incremented).unwrap();
+                }
+
+                // Jump back to condition
+                self.builder.build_unconditional_branch(cond_bb).unwrap();
+                return;
+            }
+        }
+
+        // Handle terminator if present
+        if let Some(instr) = &block.terminator {
+            let term = match instr {
+                MirInstr::Return { values } => crate::mir::mir::MirTerminator::Return {
+                    values: values.clone(),
+                },
+                MirInstr::Jump { target } => crate::mir::mir::MirTerminator::Jump {
+                    target: target.clone(),
+                },
+                MirInstr::CondJump {
+                    cond,
+                    then_block,
+                    else_block,
+                } => crate::mir::mir::MirTerminator::CondJump {
+                    cond: cond.clone(),
+                    then_block: then_block.clone(),
+                    else_block: else_block.clone(),
+                },
+                _ => return,
+            };
+            self.generate_terminator(&term, func, bb_map);
+        }
+    }
+
+    /// Enhanced cleanup for loop exit with RC
+    pub fn generate_loop_cleanup(&mut self, loop_vars: &[String]) {
+        // When exiting a loop, clean up any heap-allocated loop variables
+        for var in loop_vars {
+            if self.heap_strings.contains(var) {
+                self.emit_decref(var);
+            }
+            if self.heap_arrays.contains(var) {
+                // Clean up strings in array elements if needed
+                if let Some(str_ptrs) = self.composite_string_ptrs.get(var) {
+                    for str_ptr in str_ptrs {
+                        let data_ptr = str_ptr.into_pointer_value();
+                        let rc_header = unsafe {
+                            self.builder.build_in_bounds_gep(
+                                self.context.i8_type(),
+                                data_ptr,
+                                &[self.context.i64_type().const_int((-8_i64) as u64, true)],
+                                "rc_header",
+                            )
+                        }
+                        .unwrap();
+
+                        let decref = self.decref_fn.unwrap();
+                        self.builder
+                            .build_call(decref, &[rc_header.into()], "")
+                            .unwrap();
+                    }
+                }
+                self.emit_decref(var);
+            }
+            if self.heap_maps.contains(var) {
+                // Clean up strings in map if needed
+                if let Some(str_names) = self.composite_strings.get(var) {
+                    for str_name in str_names {
+                        if let Some(val) = self.temp_values.get(str_name) {
+                            if val.is_pointer_value() {
+                                let data_ptr = val.into_pointer_value();
+                                let rc_header = unsafe {
+                                    self.builder.build_in_bounds_gep(
+                                        self.context.i8_type(),
+                                        data_ptr,
+                                        &[self.context.i64_type().const_int((-8_i64) as u64, true)],
+                                        "rc_header",
+                                    )
+                                }
+                                .unwrap();
+
+                                let decref = self.decref_fn.unwrap();
+                                self.builder
+                                    .build_call(decref, &[rc_header.into()], "")
+                                    .unwrap();
+                            }
+                        }
+                    }
+                }
+                self.emit_decref(var);
             }
         }
     }

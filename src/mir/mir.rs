@@ -195,6 +195,88 @@ pub enum MirInstr {
         address: String,
         value: String,
     },
+
+    /// Range-based for loop: for i in 0..10 or for i in 0..=10
+    ForRange {
+        var: String,        // Loop variable (e.g., "i")
+        start: String,      // Start value (temp or literal)
+        end: String,        // End value (temp or literal)
+        inclusive: bool,    // true for ..=, false for ..
+        body_block: String, // Label of loop body block
+        exit_block: String, // Label of block after loop
+    },
+
+    /// Array iteration: for item in arr
+    ForArray {
+        var: String,        // Item variable name
+        array: String,      // Array variable name
+        index_var: String,  // Internal index counter variable
+        body_block: String, // Label of loop body block
+        exit_block: String, // Label of block after loop
+    },
+
+    /// Map iteration: for (key, value) in map
+    ForMap {
+        key_var: String,    // Key variable name
+        value_var: String,  // Value variable name
+        map: String,        // Map variable name
+        index_var: String,  // Internal index counter
+        body_block: String, // Label of loop body block
+        exit_block: String, // Label of block after loop
+    },
+
+    /// Infinite loop: for { }
+    ForInfinite {
+        body_block: String, // Label of loop body block
+    },
+
+    /// Break statement - exits current loop
+    Break {
+        target: String, // Exit block label
+    },
+
+    /// Continue statement - jumps to next iteration
+    Continue {
+        target: String, // Condition/increment block label
+    },
+
+    /// Marker instruction to indicate a block is a loop body
+    /// This helps codegen know to add increment logic
+    LoopBodyMarker {
+        var: String,             // Variable to increment (for range loops)
+        cond_block: String,      // Block to jump back to for condition check
+        increment_block: String, // Optional explicit increment block
+    },
+
+    /// Load element from array during iteration
+    LoadArrayElement {
+        dest: String,  // Destination variable
+        array: String, // Source array
+        index: String, // Index variable
+    },
+
+    /// Load key-value pair from map during iteration
+    LoadMapPair {
+        key_dest: String, // Destination for key
+        val_dest: String, // Destination for value
+        map: String,      // Source map
+        index: String,    // Index variable
+    },
+
+    ArrayLoopMarker {
+        array: String,
+        index: String,
+        item: String,
+        cond_block: String,
+    },
+
+    MapLoopMarker {
+        map: String,
+        index: String,
+        key: String,
+        value: String,
+        cond_block: String,
+    },
 }
 
 pub struct CodegenBlock<'a> {
