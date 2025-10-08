@@ -106,8 +106,15 @@ impl SemanticAnalyzer {
         // Analyze function body with **isolated scope**
         self.analyze_program(body)?;
 
+        println!(
+            "Restoring symbol table for function {}, outer_symbol_table is: {:?}",
+            name, self.outer_symbol_table
+        );
+
         // Restore outer scope
-        self.symbol_table = self.outer_symbol_table.take().unwrap(); // restore
+        if let Some(outer) = self.outer_symbol_table.take() {
+            self.symbol_table = outer;
+        }
 
         // println!(
         //     "{} {:?} {:?} {:?} {:?}",

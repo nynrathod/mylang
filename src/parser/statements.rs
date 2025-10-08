@@ -3,32 +3,37 @@ use crate::parser::ast::{AstNode, Pattern};
 use crate::parser::{ParseError, ParseResult, Parser};
 
 impl<'a> Parser<'a> {
+    /// Parses an assignment statement.
+    /// Supports tuple destructuring on the left-hand side (e.g., `a, b = ...;`).
+    /// Uses parse_comma_separated for LHS patterns, then expects '=' and parses the RHS expression.
+    /// Returns an Assignment AST node.
     pub fn parse_assignment(&mut self) -> ParseResult<AstNode> {
-        let mut patterns = Vec::new();
+        // Parse comma-separated patterns for the left-hand side
+        let patterns = self.parse_comma_separated(|p| p.parse_pattern(), TokenType::Eq)?;
 
-        // parse comma-separated LHS patterns
-        loop {
-            patterns.push(self.parse_pattern()?);
+        // Only allow assignment to a single identifier (not tuple, not wildcard)
+        // Ex., let a, _ = ...; Allowed
+        if patterns.len() != 1 {
+            return Err(ParseError::UnexpectedToken(
+                "Tuple assignment is only allowed in 'let' declarations".into(),
+            ));
+        }
 
-            if !self.consume_if(TokenType::Comma) {
-                break;
+        let lhs_pattern = patterns.into_iter().next().unwrap();
+        match lhs_pattern {
+            Pattern::Identifier(_) => {}
+            _ => {
+                // Disallow assignment to wildcard or tuple
+                // Ex., a, _ = ...; Not allowed without let
+                return Err(ParseError::UnexpectedToken(
+                    "Only single-variable assignment is allowed without 'let'".into(),
+                ));
             }
         }
 
-        // now we must have '=' after LHS
         self.expect(TokenType::Eq)?;
-
-        // parse RHS expression (could be a function call or any expression)
         let rhs = self.parse_expression()?;
-
-        // expect semicolon to finish the statement
         self.expect(TokenType::Semi)?;
-
-        let lhs_pattern = if patterns.len() == 1 {
-            patterns.remove(0)
-        } else {
-            Pattern::Tuple(patterns)
-        };
 
         Ok(AstNode::Assignment {
             pattern: lhs_pattern,
@@ -36,31 +41,31 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// Syntax: `break;`
+    /// Returns a Break AST node.
     pub fn parse_break(&mut self) -> ParseResult<AstNode> {
-        self.expect(TokenType::Break)?; // consume 'break'
-        self.expect(TokenType::Semi)?; // consume ';'
+        self.expect(TokenType::Break)?;
+        self.expect(TokenType::Semi)?;
         Ok(AstNode::Break)
     }
 
+    /// Syntax: `continue;`
+    /// Returns a Continue AST node.
     pub fn parse_continue(&mut self) -> ParseResult<AstNode> {
-        self.expect(TokenType::Continue)?; // consume 'continue'
-        self.expect(TokenType::Semi)?; // consume ';'
+        self.expect(TokenType::Continue)?;
+        self.expect(TokenType::Semi)?;
         Ok(AstNode::Continue)
     }
 
+    /// Syntax: `print(expr1, expr2, ...);`
+    /// Uses parse_comma_separated for arguments inside parentheses.
+    /// Returns a Print AST node.
     pub fn parse_print(&mut self) -> ParseResult<AstNode> {
         self.expect(TokenType::Print)?;
         self.expect(TokenType::OpenParen)?;
 
-        let mut args = Vec::new();
-        while !self.peek_is(TokenType::CloseParen) {
-            let expr = self.parse_expression()?;
-            args.push(expr);
-
-            if !self.consume_if(TokenType::Comma) {
-                break;
-            }
-        }
+        // Parse comma-separated print arguments
+        let args = self.parse_comma_separated(|p| p.parse_expression(), TokenType::CloseParen)?;
 
         self.expect(TokenType::CloseParen)?;
         self.expect(TokenType::Semi)?;
@@ -68,39 +73,42 @@ impl<'a> Parser<'a> {
         Ok(AstNode::Print { exprs: args })
     }
 
+    /// Supports tuple patterns and optional iterable expressions.
+    /// Syntax:
+    ///   - `for a, b or (a, b) in iterable { ... }`
+    ///   - `for { ... }` (infinite loop)
+    /// Returns a ForLoopStmt AST node.
     pub fn parse_for_stmt(&mut self) -> ParseResult<AstNode> {
         self.expect(TokenType::For)?;
 
-        // optional pattern
+        // Parse loop variable pattern(s)
         let pattern = if self.peek_is(TokenType::OpenBrace) {
             Pattern::Wildcard // `for { ... }` infinite loop
         } else {
-            // parse comma-separated patterns for tuples
-            let mut patterns = Vec::new();
-            loop {
-                patterns.push(self.parse_pattern()?);
-                if !self.consume_if(TokenType::Comma) {
-                    break;
-                }
-            }
+            // Parse comma-separated patterns for tuple destructuring
+            let patterns = self.parse_comma_separated(
+                |p| p.parse_pattern(),
+                TokenType::In, // Stop at 'in' or at the start of the iterable expression
+            )?;
 
             if patterns.len() == 1 {
-                patterns.remove(0)
+                patterns.into_iter().next().unwrap()
             } else {
                 Pattern::Tuple(patterns)
             }
         };
 
-        // optional iterable
+        // Parse optional iterable expression after 'in'
         let iterable = if self.peek_is(TokenType::In) {
             self.advance(); // consume 'in'
             Some(Box::new(self.parse_expression()?))
-        } else if !self.peek_is(TokenType::OpenBrace) {
-            Some(Box::new(self.parse_expression()?))
+        } else if self.peek_is(TokenType::OpenBrace) {
+            None // infinite loop, no iterable
         } else {
             None
         };
 
+        // Parse loop body block
         let body = self.parse_braced_block()?;
 
         Ok(AstNode::ForLoopStmt {
@@ -110,16 +118,21 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// Syntax:
+    ///   - `if condition { ... }`
+    ///   - `if condition { ... } else { ... }`
+    ///   - `if condition { ... } else if ...`
+    /// Supports nested else-if branches recursively.
     pub fn parse_conditional_stmt(&mut self) -> ParseResult<AstNode> {
-        self.expect(TokenType::If)?; // consume 'if'
+        self.expect(TokenType::If)?;
 
-        // condition expression
+        // Parse condition expression
         let condition = self.parse_expression()?;
 
-        // then block
+        // Parse then block
         let then_block = self.parse_braced_block()?; // parse statements until '}'
 
-        // optional else / else if
+        // Parse optional else or else-if branch
         let mut else_branch = None;
         if let Some(tok) = self.peek() {
             if tok.kind == TokenType::Else {
@@ -127,12 +140,11 @@ impl<'a> Parser<'a> {
 
                 if let Some(next) = self.peek() {
                     if next.kind == TokenType::If {
-                        // else if -> recursive call
+                        // else if: recursively parse another conditional
                         let elseif = self.parse_conditional_stmt()?;
                         else_branch = Some(Box::new(elseif));
                     } else {
-                        // else { ... }
-
+                        // else: parse block
                         let else_block = self.parse_braced_block()?;
                         else_branch = Some(Box::new(AstNode::Block(else_block)));
                     }
@@ -147,78 +159,38 @@ impl<'a> Parser<'a> {
         })
     }
 
-    pub fn parse_comma_separated<T>(
-        &mut self,
-        parse_item: impl Fn(&mut Self) -> ParseResult<T>,
-        end_token: TokenType,
-    ) -> ParseResult<Vec<T>> {
-        let mut items = Vec::new();
-
-        while !self.peek_is(end_token) {
-            let item = parse_item(self)?;
-            items.push(item);
-
-            // If no comma, we are done
-            if !self.consume_if(TokenType::Comma) {
-                break;
-            }
-        }
-
-        Ok(items)
-    }
-
+    /// Parses a pattern for use in assignments, for loops, and match arms.
+    /// Supports:
+    ///   - Identifiers: `x`
+    ///   - Tuple patterns: `(x, y, z) or without () x,y,z`
+    ///   - Wildcard: `_`
+    /// Returns a Pattern enum variant.
     pub fn parse_pattern(&mut self) -> ParseResult<Pattern> {
         if let Some(tok) = self.peek() {
             match tok.kind {
-                // Open-Close Paren Checking => for Some(x,y) {}
-                // Else checking _, a = GetUser();
-                TokenType::Identifier | TokenType::Some => {
+                // Identifier or enum variant pattern
+                TokenType::Identifier => {
                     let name = tok.value.to_string();
                     self.advance();
-
-                    if self.peek_is(TokenType::OpenParen) {
-                        self.advance(); // consume '('
-                        let mut elements = Vec::new();
-                        while !self.peek_is(TokenType::CloseParen) {
-                            elements.push(self.parse_pattern()?);
-                            if !self.consume_if(TokenType::Comma) {
-                                break;
-                            }
-                        }
-                        self.expect(TokenType::CloseParen)?;
-                        let inner_pattern = if elements.len() == 1 {
-                            Box::new(elements.remove(0))
-                        } else {
-                            Box::new(Pattern::Tuple(elements))
-                        };
-                        return Ok(Pattern::EnumVariant(name, inner_pattern));
-                    }
-
                     Ok(Pattern::Identifier(name))
                 }
 
+                // Optional:Tuple pattern for assignment and for loops e.g., (x, y)
                 TokenType::OpenParen => {
                     self.advance(); // consume '('
-                    let mut elements = Vec::new();
-
-                    while !self.peek_is(TokenType::CloseParen) {
-                        let pat = self.parse_pattern()?;
-                        elements.push(pat);
-
-                        if !self.consume_if(TokenType::Comma) {
-                            break;
-                        }
-                    }
-
+                    let elements =
+                        self.parse_comma_separated(|p| p.parse_pattern(), TokenType::CloseParen)?;
                     self.expect(TokenType::CloseParen)?;
                     Ok(Pattern::Tuple(elements))
                 }
 
+                // Wildcard pattern, e.g., _
                 TokenType::Underscore => {
                     self.advance();
                     Ok(Pattern::Wildcard)
                 }
 
+                // Unexpected token in pattern context
                 _ => Err(ParseError::UnexpectedToken(format!(
                     "Unexpected token {:?} in pattern",
                     tok.kind
@@ -229,6 +201,8 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Parses a block of statements enclosed in braces `{ ... }`.
+    /// Returns a vector of AST nodes for each statement in the block.
     fn parse_block(&mut self) -> ParseResult<Vec<AstNode>> {
         let mut stmts = Vec::new();
         while let Some(tok) = self.peek() {
@@ -241,6 +215,9 @@ impl<'a> Parser<'a> {
         Ok(stmts)
     }
 
+    /// Parses a block of statements, expecting an opening brace first.
+    /// Returns a vector of AST nodes for the block.
+    /// Used in conditionals, functions, and loops
     pub fn parse_braced_block(&mut self) -> ParseResult<Vec<AstNode>> {
         self.expect(TokenType::OpenBrace)?;
         self.parse_block()

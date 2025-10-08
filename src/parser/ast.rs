@@ -17,7 +17,6 @@ pub enum TypeNode {
     Enum(String, HashMap<String, Option<TypeNode>>),
     Range(Box<TypeNode>, Box<TypeNode>, bool),
     TypeRef(String),
-    RefCounted(Box<TypeNode>),
 }
 
 #[derive(Debug, Clone)]

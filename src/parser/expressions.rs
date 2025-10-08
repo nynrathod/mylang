@@ -3,14 +3,20 @@ use crate::parser::ast::AstNode;
 use crate::parser::{ParseError, ParseResult, Parser};
 
 impl<'a> Parser<'a> {
+    /// Entry point for parsing any expression.
+    /// Delegates to precedence-based parser.
     pub fn parse_expression(&mut self) -> ParseResult<AstNode> {
         self.parse_expression_prec(0)
     }
 
+    /// Parses an expression with operator precedence.
+    /// Uses precedence climbing for correct operator grouping.
+    /// - `min_prec`: minimum precedence to consider (used for recursion).
+    /// Returns the parsed AST node for the expression.
     fn parse_expression_prec(&mut self, min_prec: u8) -> ParseResult<AstNode> {
-        // Parse unary first
         let mut left = if let Some(tok) = self.peek() {
             match tok.kind {
+                // 🟡 TODO: Handles: -a, !b, +c (Not supported yet)
                 TokenType::Bang | TokenType::Minus | TokenType::Plus => {
                     let op = tok.kind;
                     self.advance(); // consume operator
@@ -20,22 +26,36 @@ impl<'a> Parser<'a> {
                         expr: Box::new(expr),
                     }
                 }
+                // Primary expressions:
+                // Handles: number, identifier, function call foo(a + b), string, boolean, array, map
                 _ => self.parse_primary()?,
             }
         } else {
             return Err(ParseError::EndOfInput);
         };
 
-        // Handle binary operators with precedence
+        // Binary operator expressions:
+        // Handles: a + b, x * y - z, a < b, a <= b, a > b, a >= b
+        // 🟡 TODO: Operators && , || not supported yet
+        // Groups operators according to precedence and left-to-right associativity.
         while let Some(tok) = self.peek() {
+            // Get the precedence of the current operator token
             let prec = Self::get_precedence(tok.kind);
+
+            // If the operator's precedence is lower than the minimum required,
+            // or if it's not an operator (prec == 0), stop parsing further binary operators
             if prec < min_prec || prec == 0 {
                 break;
             }
 
             let op = tok.kind;
             self.advance();
+
+            // Recursively parse the right-hand side of the expression,
+            // using higher precedence to ensure correct grouping
             let mut right = self.parse_expression_prec(prec + 1)?;
+
+            // Build a BinaryExpr AST node with the current left and right expressions
             left = AstNode::BinaryExpr {
                 left: Box::new(left),
                 op,
@@ -46,6 +66,8 @@ impl<'a> Parser<'a> {
         Ok(left)
     }
 
+    /// Handles literals (number, string, boolean), identifiers
+    /// function calls, arrays, and maps.
     fn parse_primary(&mut self) -> ParseResult<AstNode> {
         if let Some(tok) = self.peek() {
             match tok.kind {
@@ -57,6 +79,7 @@ impl<'a> Parser<'a> {
                     let tok = self.advance().unwrap();
                     let name = tok.value.to_string();
 
+                    // If followed by '(', parse as function call
                     if self.peek_is(TokenType::OpenParen) {
                         self.advance(); // consume '('
                         let args = self.parse_comma_separated(
@@ -93,70 +116,40 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Example: `[1, 2, 3]`
+    /// Uses parse_comma_separated to parse elements until ']'.
     fn parse_array_literal(&mut self) -> ParseResult<AstNode> {
         self.expect(TokenType::OpenBracket)?;
 
         let elements = self
             .parse_comma_separated(|parser| parser.parse_expression(), TokenType::CloseBracket)?;
-
         self.expect(TokenType::CloseBracket)?;
         Ok(AstNode::ArrayLiteral(elements))
     }
 
+    /// Parses a map/dictionary literal.
+    /// Example: `{ "a": 1, "b": 2 }`
+    /// Each entry is a key-value pair separated by ':' and entries separated by ','.
     fn parse_map_literal(&mut self) -> ParseResult<AstNode> {
         self.expect(TokenType::OpenBrace)?;
 
-        let mut entries = Vec::new();
-
-        while !self.peek_is(TokenType::CloseBrace) {
-            let key = self.parse_expression()?; // parse key
-            self.expect(TokenType::Colon)?; // expect ':'
-            let value = self.parse_expression()?; // parse value
-            entries.push((key, value));
-
-            // comma after value, not after key
-            if !self.consume_if(TokenType::Comma) {
-                break;
-            }
-        }
-
+        let entries = self.parse_comma_separated(
+            |p| {
+                let key = p.parse_expression()?; // parse key
+                p.expect(TokenType::Colon)?; // expect ':'
+                let value = p.parse_expression()?; // parse value
+                Ok((key, value))
+            },
+            TokenType::CloseBrace,
+        )?;
+        println!("mapsss {:?}", entries);
         self.expect(TokenType::CloseBrace)?;
         Ok(AstNode::MapLiteral(entries))
     }
 
-    fn is_binary_op(kind: TokenType) -> bool {
-        matches!(
-            kind,
-            TokenType::Gt
-                | TokenType::Lt
-                | TokenType::Eq
-                | TokenType::EqEq
-                | TokenType::EqEqEq
-                | TokenType::NotEq
-                | TokenType::NotEqEq
-                | TokenType::GtEq
-                | TokenType::LtEq
-                | TokenType::And
-                | TokenType::AndAnd
-                | TokenType::Or
-                | TokenType::OrOr
-                | TokenType::Plus
-                | TokenType::Minus
-                | TokenType::Star
-                | TokenType::Slash
-                | TokenType::Percent
-                | TokenType::PlusEq
-                | TokenType::MinusEq
-                | TokenType::StarEq
-                | TokenType::SlashEq
-                | TokenType::PercentEq
-                | TokenType::Arrow
-                | TokenType::FatArrow
-                | TokenType::RangeExc
-                | TokenType::RangeInc
-        )
-    }
-
+    /// Returns the precedence value for a given operator token.
+    /// Higher numbers mean higher precedence.
+    /// Used in precedence climbing for binary expressions.
     fn get_precedence(op: TokenType) -> u8 {
         match op {
             TokenType::OrOr => 1,
