@@ -118,30 +118,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Parses a return statement.
-    /// Syntax: `return expr1, expr2, ...;`
-    /// Consumes 'return', then parses one or more expressions separated by commas, ending with a semicolon.
-    fn parse_return(&mut self) -> ParseResult<AstNode> {
-        self.expect(TokenType::Return)?; // consume 'return'
-
-        let mut values = Vec::new();
-
-        loop {
-            let expr = self.parse_expression()?;
-            values.push(expr);
-
-            match self.peek() {
-                Some(tok) if tok.kind == TokenType::Comma => {
-                    self.advance(); // consume ',' and continue parsing next expression
-                }
-                _ => break, // no more expressions
-            }
-        }
-
-        self.expect(TokenType::Semi)?; // consume ';' at the end
-        Ok(AstNode::Return { values })
-    }
-
     /// Parses an entire program (sequence of statements).
     /// Keeps parsing statements until all tokens are consumed.
     pub fn parse_program(&mut self) -> ParseResult<AstNode> {

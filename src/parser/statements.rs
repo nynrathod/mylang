@@ -41,38 +41,6 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// Syntax: `break;`
-    /// Returns a Break AST node.
-    pub fn parse_break(&mut self) -> ParseResult<AstNode> {
-        self.expect(TokenType::Break)?;
-        self.expect(TokenType::Semi)?;
-        Ok(AstNode::Break)
-    }
-
-    /// Syntax: `continue;`
-    /// Returns a Continue AST node.
-    pub fn parse_continue(&mut self) -> ParseResult<AstNode> {
-        self.expect(TokenType::Continue)?;
-        self.expect(TokenType::Semi)?;
-        Ok(AstNode::Continue)
-    }
-
-    /// Syntax: `print(expr1, expr2, ...);`
-    /// Uses parse_comma_separated for arguments inside parentheses.
-    /// Returns a Print AST node.
-    pub fn parse_print(&mut self) -> ParseResult<AstNode> {
-        self.expect(TokenType::Print)?;
-        self.expect(TokenType::OpenParen)?;
-
-        // Parse comma-separated print arguments
-        let args = self.parse_comma_separated(|p| p.parse_expression(), TokenType::CloseParen)?;
-
-        self.expect(TokenType::CloseParen)?;
-        self.expect(TokenType::Semi)?;
-
-        Ok(AstNode::Print { exprs: args })
-    }
-
     /// Supports tuple patterns and optional iterable expressions.
     /// Syntax:
     ///   - `for a, b or (a, b) in iterable { ... }`
@@ -157,6 +125,62 @@ impl<'a> Parser<'a> {
             then_block,
             else_branch,
         })
+    }
+
+    /// Syntax: `break;`
+    /// Returns a Break AST node.
+    pub fn parse_break(&mut self) -> ParseResult<AstNode> {
+        self.expect(TokenType::Break)?;
+        self.expect(TokenType::Semi)?;
+        Ok(AstNode::Break)
+    }
+
+    /// Syntax: `continue;`
+    /// Returns a Continue AST node.
+    pub fn parse_continue(&mut self) -> ParseResult<AstNode> {
+        self.expect(TokenType::Continue)?;
+        self.expect(TokenType::Semi)?;
+        Ok(AstNode::Continue)
+    }
+
+    /// Syntax: `print(expr1, expr2, ...);`
+    /// Uses parse_comma_separated for arguments inside parentheses.
+    /// Returns a Print AST node.
+    pub fn parse_print(&mut self) -> ParseResult<AstNode> {
+        self.expect(TokenType::Print)?;
+        self.expect(TokenType::OpenParen)?;
+
+        // Parse comma-separated print arguments
+        let args = self.parse_comma_separated(|p| p.parse_expression(), TokenType::CloseParen)?;
+
+        self.expect(TokenType::CloseParen)?;
+        self.expect(TokenType::Semi)?;
+
+        Ok(AstNode::Print { exprs: args })
+    }
+
+    /// Parses a return statement.
+    /// Syntax: `return expr1, expr2, ...;`
+    /// Consumes 'return', then parses one or more expressions separated by commas, ending with a semicolon.
+    pub fn parse_return(&mut self) -> ParseResult<AstNode> {
+        self.expect(TokenType::Return)?; // consume 'return'
+
+        let mut values = Vec::new();
+
+        loop {
+            let expr = self.parse_expression()?;
+            values.push(expr);
+
+            match self.peek() {
+                Some(tok) if tok.kind == TokenType::Comma => {
+                    self.advance(); // consume ',' and continue parsing next expression
+                }
+                _ => break, // no more expressions
+            }
+        }
+
+        self.expect(TokenType::Semi)?; // consume ';' at the end
+        Ok(AstNode::Return { values })
     }
 
     /// Parses a pattern for use in assignments, for loops, and match arms.
