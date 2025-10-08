@@ -24,12 +24,10 @@ pub enum Pattern {
     Identifier(String),
     Tuple(Vec<Pattern>),
     Wildcard,
-    EnumVariant(String, Box<Pattern>),
 }
 
 #[derive(Debug, Clone)]
 pub enum AstNode {
-    TupleIdentifier(Vec<String>),
     Program(Vec<AstNode>),
     NumberLiteral(i32),
     Identifier(String),
@@ -112,20 +110,4 @@ pub enum AstNode {
         end: Box<AstNode>,
         inclusive: bool,
     },
-}
-
-#[derive(Debug, Clone)]
-pub enum BinaryOp {
-    Plus,
-    Minus,
-    Mul,
-    Div,
-    Gt,
-    Lt,
-    Eq,
-    Ne,
-    Ge,
-    Le,
-    And,
-    Or,
 }
