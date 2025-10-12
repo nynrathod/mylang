@@ -5,37 +5,201 @@ use crate::analyzer::types::NamedError;
 use crate::parser::ast::{AstNode, Pattern, TypeNode};
 
 impl SemanticAnalyzer {
-    pub fn analyze_conditional_stmt(
+    /// Analyze an assignment statement
+    /// (e.g., `(x, y) = foo()` if lhs x,y types match with right foo return types).
+    /// Checks that the left and right sides match in number and type,
+    /// and binds variables to the symbol table.
+    pub fn analyze_assignment(
         &mut self,
-        condition: &mut AstNode,
-        then_block: &mut Vec<AstNode>,
-        else_branch: &mut Option<Box<AstNode>>,
+        pattern: &Pattern,
+        value: &AstNode,
     ) -> Result<(), SemanticError> {
-        // Expect bool in ConditionalStmt always
-        let cond_type = self.infer_type(condition)?;
-        if cond_type != TypeNode::Bool {
-            return Err(SemanticError::InvalidConditionType(TypeMismatch {
-                expected: TypeNode::Bool,
-                found: cond_type,
-                value: None,
-            }));
+        // Flatten the LHS pattern (tuple destructuring) and validate identifiers
+        let targets = self.collect_and_validate_targets(pattern)?;
+        let lhs_count = targets.len();
+
+        // Infer the RHS expression into a list of types
+        let rhs_types = self.infer_rhs_types(value, lhs_count)?;
+
+        // Ensure LHS and RHS have the same number of elements
+        if rhs_types.len() != lhs_count {
+            return Err(SemanticError::TupleAssignmentMismatch {
+                expected: rhs_types.len(),
+                found: lhs_count,
+            });
         }
 
-        self.analyze_program(then_block)?;
-
-        if let Some(else_node) = else_branch {
-            self.analyze_node(else_node)?;
-        }
+        // Add variables into the symbol table with their inferred types
+        self.bind_targets(&targets, &rhs_types);
 
         Ok(())
     }
 
+    /// Flattens a pattern (e.g., `(x, y, _)`) into a flat list of variables.
+    /// Ensures each identifier is valid (not reserved, not empty, etc.).
+    pub fn collect_and_validate_targets(
+        &self,
+        pattern: &Pattern,
+    ) -> Result<Vec<Pattern>, SemanticError> {
+        let mut targets = Vec::new();
+        match pattern {
+            Pattern::Identifier(name) if !Self::is_valid_identifier(name) => {
+                return Err(SemanticError::InvalidAssignmentTarget {
+                    target: name.clone(),
+                });
+            }
+            Pattern::Identifier(_) | Pattern::Wildcard => {
+                targets.push(pattern.clone());
+            }
+            Pattern::Tuple(names) => {
+                for p in names {
+                    match p {
+                        Pattern::Identifier(_) | Pattern::Wildcard => {
+                            targets.push(p.clone());
+                        }
+                        _ => {
+                            return Err(SemanticError::InvalidAssignmentTarget {
+                                target: format!("{:?}", p),
+                            });
+                        }
+                    }
+                }
+            }
+            _ => {
+                return Err(SemanticError::InvalidAssignmentTarget {
+                    target: format!("{:?}", pattern),
+                });
+            }
+        }
+        Ok(targets)
+    }
+
+    /// Adds all identifiers from the LHS into the current scope’s symbol table.
+    /// Ignores wildcards (`_`), only inserts real variable names.
+    fn bind_targets(&mut self, targets: &[Pattern], rhs_types: &[TypeNode]) {
+        for (target, ty) in targets.iter().zip(rhs_types.iter()) {
+            if let Pattern::Identifier(name) = target {
+                // Ignore wildcard `_`, only insert real names
+                if name != "_" {
+                    self.symbol_table.insert(
+                        name.clone(),
+                        SymbolInfo {
+                            ty: ty.clone(),
+                            mutable: true,
+                            is_ref_counted: Self::should_be_rc(&ty),
+                        },
+                    );
+                }
+            }
+        }
+    }
+
+    /// Infers the types of the RHS expression and returns them as a vector.
+    /// - Functions can return single or multiple values.
+    /// - Tuples spread into multiple values.
+    /// - Simple expressions just return one type.
+    fn infer_rhs_types(
+        &self,
+        value: &AstNode,
+        lhs_count: usize,
+    ) -> Result<Vec<TypeNode>, SemanticError> {
+        match value {
+            // Function call: check validity and return types
+            AstNode::FunctionCall { func, args } => self.check_function_call(func, args),
+
+            // Tuple literal: infer each element's type
+            AstNode::TupleLiteral(elements) => {
+                elements.iter().map(|e| self.infer_type(e)).collect()
+            }
+
+            // If LHS expects multiple values but RHS isn’t tuple/function → error
+            _ if lhs_count > 1 => Err(SemanticError::InvalidFunctionCall {
+                func: format!("{:?}", value),
+            }),
+
+            // Single assignment: just infer the one type
+            _ => Ok(vec![self.infer_type(value)?]),
+        }
+    }
+
+    /// Validates a function call:
+    /// - Checks if the function exists.
+    /// - Verifies number and types of arguments.
+    /// - Returns function’s declared return type(s).
+    fn check_function_call(
+        &self,
+        func: &AstNode,
+        args: &[AstNode],
+    ) -> Result<Vec<TypeNode>, SemanticError> {
+        // Ensure the call target is a simple identifier (not `foo.bar` or similar yet)
+        let name = if let AstNode::Identifier(n) = &*func {
+            n
+        } else {
+            return Err(SemanticError::InvalidFunctionCall {
+                func: format!("{:?}", func),
+            });
+        };
+
+        // Look up function definition in the table
+        if let Some((param_types, ret_ty)) = self.function_table.get(name.as_str()) {
+            // Check number of arguments
+            if args.len() != param_types.len() {
+                return Err(SemanticError::FunctionArgumentMismatch {
+                    name: name.clone(),
+                    expected: param_types.len(),
+                    found: args.len(),
+                });
+            }
+
+            // Check argument types
+            for (arg, expected_ty) in args.iter().zip(param_types.iter()) {
+                let arg_ty = self.infer_type(arg)?;
+                if &arg_ty != expected_ty {
+                    return Err(SemanticError::FunctionArgumentTypeMismatch {
+                        name: name.clone(),
+                        expected: expected_ty.clone(),
+                        found: arg_ty,
+                    });
+                }
+            }
+
+            // Return type(s)
+            Ok(match ret_ty {
+                TypeNode::Tuple(types) => types.clone(), // multi-value
+                t => vec![t.clone()],                    // single value
+            })
+        } else {
+            Err(SemanticError::UndeclaredFunction(NamedError {
+                name: name.clone(),
+            }))
+        }
+    }
+
+    /// Checks if an identifier name is valid (not a keyword, not empty, not starting with a digit).
+    /// Used for variable and function names.
+    fn is_valid_identifier(name: &str) -> bool {
+        // List of reserved keywords (sync with your lexer)
+        const KEYWORDS: &[&str] = &[
+            "let", "fn", "import", "struct", "enum", "map", "if", "else", "for", "in", "return",
+            "break", "continue", "print", "true", "false",
+        ];
+        // Disallow empty, reserved, or starts with digit
+        if name.is_empty() || KEYWORDS.contains(&name) || name.chars().next().unwrap().is_digit(10)
+        {
+            return false;
+        }
+        true
+    }
+
+    /// - Checks that each expression in the print statement is of a printable type.
+    /// - Infers the type of each expression and ensures it's allowed
+    /// (int, float, bool, string, array, map, tuple).
+    /// Note: Float not supported yet as type yet, TODO later
     pub fn analyze_print(&mut self, node: &mut AstNode) -> Result<(), SemanticError> {
         if let AstNode::Print { exprs } = node {
             for expr in exprs.iter_mut() {
-                // Infer type for each expression
                 let ty = self.infer_type(expr)?;
-                // Optionally: You can restrict print to only supported types
+                // Only allow printing of supported types.
                 match ty {
                     TypeNode::Int
                     | TypeNode::Float
@@ -44,42 +208,88 @@ impl SemanticAnalyzer {
                     | TypeNode::Array(_)
                     | TypeNode::Map(_, _)
                     | TypeNode::Tuple(_) => {
-                        // OK to print
+                        // Supported type for printing.
                     }
                     _ => {
+                        // If the type is not supported, return an error.
                         return Err(SemanticError::InvalidPrintType { found: ty });
                     }
                 }
-
-                // For expressions that are variables, arrays, maps, or nested,
-                // recursively analyze them if needed
+                // Recursively analyze the expression for semantic correctness.
                 self.analyze_node(expr)?;
             }
             Ok(())
         } else {
-            // Not a print node, shouldn't reach here
+            // NOTE: This branch should never be reached in normal operation.
+            // It exists only as a safeguard in case the dispatcher calls this function
+            // with a non-Print node, which would indicate a bug elsewhere in the analyzer.
             Err(SemanticError::UnexpectedNode {
                 expected: "print".to_string(),
             })
         }
     }
 
+    /// Analyze a conditional statement (if/else).
+    /// - Ensures the condition expression evaluates to a boolean type.
+    /// - Returns an error if the condition is not a boolean.
+    pub fn analyze_conditional_stmt(
+        &mut self,
+        condition: &mut AstNode,
+        then_block: &mut Vec<AstNode>,
+        else_branch: &mut Option<Box<AstNode>>,
+    ) -> Result<(), SemanticError> {
+        // The condition of an if/else must always be a boolean.
+        let cond_type = self.infer_type(condition)?;
+        if cond_type != TypeNode::Bool {
+            // If the condition is not a boolean, return an error.
+            return Err(SemanticError::InvalidConditionType(TypeMismatch {
+                expected: TypeNode::Bool,
+                found: cond_type,
+                value: None,
+            }));
+        }
+
+        // Analyze the 'then' block.
+        self.analyze_program(then_block)?;
+
+        // If there is an 'else' branch, analyze it as well.
+        if let Some(else_node) = else_branch {
+            self.analyze_node(else_node)?;
+        }
+
+        Ok(())
+    }
+
+    /// - Sets up a new scope for loop variables.
+    /// - Checks the type of the iterable expression.
+    /// - For arrays: expects a single variable pattern.
+    /// - For maps: expects a tuple pattern (key, value).
+    /// - For ranges: expects a single variable or wildcard.
+    /// - For infinite loops (no iterable): only allows wildcard.
+    /// - Binds loop variables to their types in the symbol table.
+    /// - Restores the outer symbol table after the loop.
+    /// - Returns errors for invalid patterns or non-iterable types.
     pub fn analyze_for_stmt(
         &mut self,
         pattern: &mut Pattern,
         iterable: Option<&mut AstNode>,
         body: &mut Vec<AstNode>,
     ) -> Result<(), SemanticError> {
+        // Save the outer symbol table and create a new scope for the loop.
         let outer_table = self.symbol_table.clone();
         let mut loop_scope = outer_table.clone();
+        // Swap the current symbol table with the loop scope.
+        // This ensures variables declared inside the loop are scoped to the loop body
+        // and do not leak into the outer scope. We'll restore the outer scope after analysis.
         std::mem::swap(&mut self.symbol_table, &mut loop_scope);
 
         if let Some(iter_node) = iterable {
+            // Infer the type of the iterable expression.
             let iter_type = self.infer_type(iter_node)?;
 
             match iter_type {
                 TypeNode::Array(elem_type) => {
-                    // Arrays: tuple pattern must have 1 element
+                    // For arrays, only a single variable pattern is allowed.
                     if let Pattern::Tuple(patterns) = pattern {
                         if patterns.len() != 1 {
                             return Err(SemanticError::InvalidAssignmentTarget {
@@ -93,7 +303,7 @@ impl SemanticAnalyzer {
                     }
                 }
                 TypeNode::Map(key_type, value_type) => match pattern {
-                    // Maps: tuple pattern must have 2 elements (key, value)
+                    // For maps, expect a tuple pattern with two elements (key, value).
                     Pattern::Tuple(patterns) => {
                         if patterns.len() != 2 {
                             return Err(SemanticError::TupleAssignmentMismatch {
@@ -112,8 +322,9 @@ impl SemanticAnalyzer {
                     }
                 },
                 TypeNode::Range(_, _, _) => {
+                    // For ranges, only a single variable or wildcard is allowed.
                     if let Pattern::Identifier(_) | Pattern::Wildcard = pattern {
-                        // iterator is always Int
+                        // Range iterator is always Int.
                         self.bind_pattern_to_type(pattern, &TypeNode::Int)?;
                     } else {
                         return Err(SemanticError::InvalidAssignmentTarget {
@@ -123,13 +334,14 @@ impl SemanticAnalyzer {
                 }
 
                 _ => {
+                    // If the iterable is not an array, map, or range, return an error.
                     return Err(SemanticError::InvalidAssignmentTarget {
                         target: "Cannot iterate non-iterable type".to_string(),
-                    })
+                    });
                 }
             }
         } else {
-            // Infinite loop: only `_` allowed
+            // For infinite loops (no iterable), only wildcard is allowed.
             match pattern {
                 Pattern::Wildcard => {}
                 _ => {
@@ -141,11 +353,18 @@ impl SemanticAnalyzer {
             }
         }
 
+        // Analyze the loop body for semantic correctness.
         self.analyze_program(body)?;
+        // Restore the outer symbol table after the loop.
         self.symbol_table = outer_table;
         Ok(())
     }
 
+    /// Binds a pattern to a type in the symbol table.
+    /// - For identifiers: adds the variable to the symbol table with the given type.
+    /// - For wildcards: ignores (does not bind).
+    /// - For tuple patterns: recursively binds each element to the corresponding type in a tuple.
+    /// - Returns errors for redeclaration, mismatched tuple lengths, or invalid patterns.
     fn bind_pattern_to_type(
         &mut self,
         pattern: &mut Pattern,
@@ -153,11 +372,13 @@ impl SemanticAnalyzer {
     ) -> Result<(), SemanticError> {
         match pattern {
             Pattern::Identifier(name) => {
+                // If the variable is already declared in the current scope, return an error.
                 if self.symbol_table.contains_key(name) {
                     return Err(SemanticError::VariableRedeclaration(NamedError {
                         name: name.clone(),
                     }));
                 }
+                // Add the variable to the symbol table with the given type.
                 self.symbol_table.insert(
                     name.clone(),
                     SymbolInfo {
@@ -167,13 +388,17 @@ impl SemanticAnalyzer {
                     },
                 );
             }
-            Pattern::Wildcard => {} // `_` ignores type
+            Pattern::Wildcard => {
+                // Wildcard pattern `_` does not bind any variable.
+            }
             Pattern::Tuple(patterns) => match ty {
+                // For tuple patterns, recursively bind each element to the corresponding type.
                 TypeNode::Tuple(types) if types.len() == patterns.len() => {
                     for (p, t) in patterns.iter_mut().zip(types.iter()) {
                         self.bind_pattern_to_type(p, t)?;
                     }
                 }
+                // If the type is not a tuple or the lengths do not match, return an error.
                 TypeNode::Array(_) | TypeNode::Map(_, _) | TypeNode::Range(_, _, _) => {
                     return Err(SemanticError::TupleAssignmentMismatch {
                         expected: 1,
@@ -187,6 +412,7 @@ impl SemanticAnalyzer {
                 }
             },
             _ => {
+                // Any other pattern is invalid.
                 return Err(SemanticError::InvalidAssignmentTarget {
                     target: format!("{:?}", pattern),
                 });

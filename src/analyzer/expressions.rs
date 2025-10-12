@@ -4,41 +4,57 @@ use crate::lexar::token::TokenType;
 use crate::parser::ast::{AstNode, TypeNode};
 
 impl SemanticAnalyzer {
+    /// Infers the type of an AST node (expression).
+    /// This is the core type inference function for all expressions in the language.
+    /// - Returns the type of literals directly.
+    /// - Looks up identifiers in the symbol table.
+    /// - Checks types for binary/unary expressions, function calls, arrays, maps, etc.
+    /// - Returns errors for undeclared variables, type mismatches, or invalid operations.
     pub fn infer_type(&self, node: &AstNode) -> Result<TypeNode, SemanticError> {
         match node {
+            // Integer literal: always Int type
             AstNode::NumberLiteral(_) => Ok(TypeNode::Int),
+            // String literal: always String type
             AstNode::StringLiteral(_) => Ok(TypeNode::String),
+            // Boolean literal: always Bool type
             AstNode::BoolLiteral(_) => Ok(TypeNode::Bool),
 
+            // Identifier (variable name): look up in symbol table
             AstNode::Identifier(name) => {
                 if let Some(info) = self.symbol_table.get(name) {
+                    // Found in current scope then return its type
                     Ok(info.ty.clone())
                 } else if let Some(outer) = &self.outer_symbol_table {
-                    // If variable defined out of function
+                    // If variable is defined in an outer scope but not accessible here
                     if outer.contains_key(name) {
                         return Err(SemanticError::OutOfScopeVariable(NamedError {
                             name: name.clone(),
                         }));
                     }
-                    // If not found variable declaration
+                    // If not found in any scope, variable is undeclared
                     else {
                         return Err(SemanticError::UndeclaredVariable(NamedError {
                             name: name.clone(),
                         }));
                     }
                 } else {
+                    // No outer scope, variable is undeclared
                     Err(SemanticError::UndeclaredVariable(NamedError {
                         name: name.clone(),
                     }))
                 }
             }
 
+            // Binary expressions (e.g., arithmetic, comparison, logical, range)
+            // Ex., let is_equal = x == y;
+            // TODO: check llvm handled for this or not
             AstNode::BinaryExpr { left, op, right } => {
+                // Infer types of both sides
                 let left_type = self.infer_type(left)?;
                 let right_type = self.infer_type(right)?;
 
                 match op {
-                    // Comparison operators
+                    // Comparison operators (==, !=, >, <, etc.)
                     TokenType::EqEq
                     | TokenType::EqEqEq
                     | TokenType::NotEq
@@ -47,6 +63,7 @@ impl SemanticAnalyzer {
                     | TokenType::Lt
                     | TokenType::GtEq
                     | TokenType::LtEq => {
+                        // Both sides must be the same type
                         if left_type != right_type {
                             return Err(SemanticError::OperatorTypeMismatch(TypeMismatch {
                                 expected: left_type,
@@ -54,17 +71,18 @@ impl SemanticAnalyzer {
                                 value: None,
                             }));
                         }
+                        // Comparison always returns Bool
                         Ok(TypeNode::Bool)
                     }
 
-                    // Ranges for loops
-                    // TokenType::RangeExc = exclusive range (e.g., 0..5)
-                    // TokenType::RangeInc = inclusive range (e.g., 0..=5)
+                    // Range operators for loops (.. and ..=)
+                    // Ex., for i in 0..10 {
+                    // TODO: check llvm handled for this or not
                     TokenType::RangeExc | TokenType::RangeInc => {
-                        // Both start (left) and end (right) of the range must be integers
+                        // Both start and end must be Int
                         if left_type != TypeNode::Int || right_type != TypeNode::Int {
                             return Err(SemanticError::OperatorTypeMismatch(TypeMismatch {
-                                expected: TypeNode::Int, // expected type is Int
+                                expected: TypeNode::Int,
                                 found: if left_type != TypeNode::Int {
                                     left_type
                                 } else {
@@ -73,20 +91,22 @@ impl SemanticAnalyzer {
                                 value: None,
                             }));
                         }
-
-                        // Determine if the range is inclusive (..=) or exclusive (..)
+                        // Determine if range is inclusive or exclusive
                         let inclusive = matches!(op, TokenType::RangeInc);
-
-                        // Return the type of the range: Range<Int, Int, inclusive>
+                        // Return Range type
                         Ok(TypeNode::Range(
-                            Box::new(TypeNode::Int), // start type
-                            Box::new(TypeNode::Int), // end type
-                            inclusive,               // inclusive/exclusive
+                            Box::new(TypeNode::Int),
+                            Box::new(TypeNode::Int),
+                            inclusive,
                         ))
                     }
 
-                    // Logical gates
+                    // Logical operators (&&, ||)
+                    // Ex., let a = true;
+                    // let b = a && c;
+                    // TODO: check llvm handled for this or not
                     TokenType::AndAnd | TokenType::OrOr => {
+                        // Both sides must be Bool
                         if left_type != TypeNode::Bool || right_type != TypeNode::Bool {
                             return Err(SemanticError::OperatorTypeMismatch(TypeMismatch {
                                 expected: TypeNode::Bool,
@@ -101,17 +121,22 @@ impl SemanticAnalyzer {
                         Ok(TypeNode::Bool)
                     }
 
-                    // Arithmetic operators
+                    // Arithmetic operators (+, -, *, /, %)
+                    // Ex., let a = "hello" + "world";
+                    // Ex., let b = 1 + 2;
+                    // TODO: check llvm handled for this or not
                     TokenType::Plus
                     | TokenType::Minus
                     | TokenType::Star
                     | TokenType::Slash
                     | TokenType::Percent => match (left_type.clone(), right_type.clone()) {
+                        // both lhs and rhs should match type
                         (TypeNode::Int, TypeNode::Int) => Ok(TypeNode::Int),
-                        // allow string concatenation
+                        // String concatenation
                         (TypeNode::String, TypeNode::String) => Ok(TypeNode::String),
-                        // Float is not supported for now
+                        // Float arithmetic (if supported)
                         (TypeNode::Float, TypeNode::Float) => Ok(TypeNode::Float),
+                        // Any other type combination is invalid
                         _ => Err(SemanticError::OperatorTypeMismatch(TypeMismatch {
                             expected: left_type,
                             found: right_type,
@@ -119,13 +144,23 @@ impl SemanticAnalyzer {
                         })),
                     },
 
+                    // Any other operator is not implemented
                     _ => unimplemented!("Operator {:?} not handled", op),
                 }
             }
 
+            // Unary expressions (e.g., -x, !x): infer type of the inner expression
+            // Ex., let neg = -x;
+            // Ex., let not = !flag;
+            // TODO: check llvm handled for this or not
             AstNode::UnaryExpr { expr, .. } => self.infer_type(expr),
 
+            // Function call: infer return type from function signature
+            // Ex., let result = myFunction(1, "abc");
             AstNode::FunctionCall { func, args: _ } => {
+                // Function must be an identifier
+                // - Allowed: `myFunction(1, 2)`
+                // - Not allowed: `(some_expr)(1, 2)` or `foo.bar(1, 2)`
                 let name = if let AstNode::Identifier(n) = &**func {
                     n
                 } else {
@@ -133,17 +168,21 @@ impl SemanticAnalyzer {
                         func: format!("{:?}", func),
                     });
                 };
+                // Look up function in function table
                 if let Some((_param_types, ret_ty)) = self.function_table.get(name) {
                     Ok(ret_ty.clone())
                 } else {
+                    // Function not found
                     Err(SemanticError::UndeclaredFunction(NamedError {
                         name: name.clone(),
                     }))
                 }
             }
 
+            // Array literal: infer type of elements
             AstNode::ArrayLiteral(elements) => {
-                // Error if Array is empty, can't infer types
+                // Error if array is empty: cannot infer type
+                // let empty = [];
                 if elements.is_empty() {
                     return Err(SemanticError::EmptyCollectionTypeInferenceError(
                         TypeMismatch {
@@ -154,7 +193,8 @@ impl SemanticAnalyzer {
                     ));
                 }
 
-                // Use first element to infer array type
+                // Infer type from first element
+                // This check type of element insides
                 let first_type = self.infer_type(&elements[0])?;
                 // Check all elements for type consistency
                 for el in elements.iter() {
@@ -167,11 +207,13 @@ impl SemanticAnalyzer {
                         }));
                     }
                 }
+                // All elements are the same type: return Array of that type
                 Ok(TypeNode::Array(Box::new(first_type)))
             }
 
+            // Map literal: infer type of keys and values
             AstNode::MapLiteral(pairs) => {
-                // Error if map is empty, can't infer types
+                // Error if map is empty: cannot infer type
                 if pairs.is_empty() {
                     return Err(SemanticError::EmptyCollectionTypeInferenceError(
                         TypeMismatch {
@@ -193,6 +235,7 @@ impl SemanticAnalyzer {
                 let value_type = self.infer_type(&pairs[0].1)?;
 
                 // Only allow Int, String, or Bool as map keys
+                // TODO: check codegen if implemented or not
                 match key_type {
                     TypeNode::Int | TypeNode::String | TypeNode::Bool => {}
                     _ => {
@@ -226,13 +269,13 @@ impl SemanticAnalyzer {
                     }
                 }
 
+                // All keys and values are consistent: return Map type
                 Ok(TypeNode::Map(Box::new(key_type), Box::new(value_type)))
             }
 
-            _ => {
-                // For statements, return Void; actual checking happens in analyze_node
-                Ok(TypeNode::Void)
-            }
+            // Any other AST node (usually statements): return Void type.
+            // Actual semantic checking for statements happens elsewhere.
+            _ => Ok(TypeNode::Void),
         }
     }
 }

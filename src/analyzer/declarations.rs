@@ -6,6 +6,120 @@ use crate::analyzer::analyzer::SymbolInfo;
 use crate::parser::ast::{AstNode, TypeNode};
 
 impl SemanticAnalyzer {
+    /// Analyze a variable declaration (`let` statement).
+    ///
+    /// This function performs semantic analysis for variable declarations. It:
+    /// - Checks if a type annotation is present and ensures the assigned value matches it.
+    /// - If no annotation, infers the type from the assigned value.
+    /// - Updates the AST node with the inferred type and reference counting info.
+    /// - Validates the assignment pattern (identifiers, wildcards, tuples).
+    /// - Ensures the number of patterns matches the number of values (for tuples).
+    /// - Adds variables to the symbol table, marking mutability and reference counting.
+    /// - Returns semantic errors for type mismatches, redeclarations, or invalid patterns.
+    pub fn analyze_let_decl(&mut self, node: &mut AstNode) -> Result<(), SemanticError> {
+        match node {
+            AstNode::LetDecl {
+                mutable,
+                type_annotation,
+                pattern,
+                value,
+                is_ref_counted,
+            } => {
+                // Determine the type of the RHS (value being assigned)
+                let rhs_type = if let Some(annotated_type) = type_annotation.as_ref() {
+                    // If a type annotation exists, check that the RHS matches it.
+                    let rhs_type = self.infer_type(value)?;
+                    if rhs_type != *annotated_type {
+                        return Err(SemanticError::VarTypeMismatch(TypeMismatch {
+                            expected: annotated_type.clone(),
+                            found: rhs_type,
+                            value: Some(value.clone()),
+                        }));
+                    }
+                    annotated_type.clone()
+                } else {
+                    // No annotation: infer type from the value.
+                    self.infer_type(value)?
+                };
+
+                // Update the type annotation to reflect the inferred type if it was missing.
+                *type_annotation = Some(rhs_type.clone());
+
+                // println!("Before: {:?}", is_ref_counted);
+
+                // Update AST with reference counting info based on the type.
+                *is_ref_counted = Some(Self::should_be_rc(&rhs_type));
+                // println!("After: {:?}", is_ref_counted);
+
+                // Validate and collect assignment targets from the pattern.
+                let targets = self.collect_and_validate_targets(pattern)?;
+
+                // If RHS is a tuple, each element must match a pattern.
+                // Otherwise, treat RHS as a single-element list.
+                let rhs_types = match &rhs_type {
+                    TypeNode::Tuple(types) => types.clone(),
+                    t => vec![t.clone()],
+                };
+                // Check that the number of LHS patterns matches the number of RHS types.
+                if rhs_types.len() != targets.len() {
+                    return Err(SemanticError::TupleAssignmentMismatch {
+                        expected: rhs_types.len(),
+                        found: targets.len(),
+                    });
+                }
+
+                // Bind each pattern to its type in the symbol table.
+                for (target, ty) in targets.iter().zip(rhs_types.iter()) {
+                    match target {
+                        // Identifier: add to symbol table, mark mutability.
+                        crate::parser::ast::Pattern::Identifier(name) => {
+                            // Prevent redeclaration of variables.
+                            if self.symbol_table.contains_key(name) {
+                                return Err(SemanticError::VariableRedeclaration(NamedError {
+                                    name: name.clone(),
+                                }));
+                            }
+                            // Skip wildcards (do not store them).
+                            if name != "_" {
+                                self.symbol_table.insert(
+                                    name.clone(),
+                                    SymbolInfo {
+                                        ty: ty.clone(),
+                                        mutable: *mutable,
+                                        is_ref_counted: Self::should_be_rc(&ty),
+                                    },
+                                );
+                            }
+                        }
+                        // Wildcard: allowed but not stored.
+                        crate::parser::ast::Pattern::Wildcard => {}
+                        // Anything else: invalid pattern.
+                        _ => {
+                            return Err(SemanticError::InvalidAssignmentTarget {
+                                target: format!("{:?}", target),
+                            });
+                        }
+                    }
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// Analyze a function declaration.
+    ///
+    /// This function performs semantic analysis for function declarations. It:
+    /// - Checks if the function is already defined (prevents redeclaration).
+    /// - Validates parameter types and ensures no duplicate parameter names.
+    /// - Handles public/private visibility rules (public functions must start with uppercase).
+    /// - Adds the function signature to the function table.
+    /// - Creates a local scope for parameters and analyzes the function body in isolation.
+    /// - If no return type is specified, marks as `Void` and ensures no return values are present.
+    /// - Appends an implicit empty return if needed.
+    /// - Checks for required return statements and verifies their types.
+    /// - Restores the outer symbol table after analysis.
+    /// - Returns semantic errors for any violations.
     pub fn analyze_functional_decl(
         &mut self,
         name: &str,
@@ -14,7 +128,7 @@ impl SemanticAnalyzer {
         return_type: &mut Option<TypeNode>,
         body: &mut Vec<AstNode>,
     ) -> Result<(), SemanticError> {
-        // If function already defined
+        // If function already defined, return error.
         if self.function_table.contains_key(name) {
             return Err(SemanticError::FunctionRedeclaration(NamedError {
                 name: name.to_string(),
@@ -22,12 +136,14 @@ impl SemanticAnalyzer {
         }
         let param_types: Vec<TypeNode> = params.iter().map(|(_, t)| t.clone().unwrap()).collect();
 
+        // Add function signature to function table.
         self.function_table.insert(
             name.to_string(),
             (param_types, return_type.clone().unwrap_or(TypeNode::Void)),
         );
 
         // Is public or private function
+        // Enforce public function naming convention.
         if visibility == "Public" {
             if let Some(first_char) = name.chars().next() {
                 if !first_char.is_uppercase() {
@@ -38,25 +154,25 @@ impl SemanticAnalyzer {
             }
         }
 
-        // Create a local scope for function parameters
+        // Create a local scope for function parameters.
         let mut local_scope: HashMap<String, SymbolInfo> = HashMap::new();
 
         for (param_name, param_type) in params.iter() {
-            // Type is mandator if parameter passed. Check type exists
+            // Type is mandatory for parameters. Check type exists.
             let param_type = param_type.as_ref().ok_or_else(|| {
                 SemanticError::MissingParamType(NamedError {
                     name: param_name.clone(),
                 })
             })?;
 
-            // Check duplicate param names
+            // Check for duplicate parameter names.
             if local_scope.contains_key(param_name) {
                 return Err(SemanticError::FunctionParamRedeclaration(NamedError {
                     name: param_name.clone(),
                 }));
             }
 
-            // Insert parameter into local scope (immutable)
+            // Insert parameter into local scope (parameters are always immutable).
             local_scope.insert(
                 param_name.clone(),
                 SymbolInfo {
@@ -67,12 +183,11 @@ impl SemanticAnalyzer {
             );
         }
 
-        // mark as Void if no return type
+        // If no return type, mark as Void and ensure no return values are present.
         if return_type.is_none() {
             *return_type = Some(TypeNode::Void);
 
-            // Ensure no return values are present
-            // If no return type specified, function can't return except Void;
+            // Ensure no return values are present in Void functions.
             for node in body.iter() {
                 if let AstNode::Return { values } = node {
                     if !values.is_empty() {
@@ -83,7 +198,7 @@ impl SemanticAnalyzer {
                 }
             }
 
-            // Append implicit empty return if last statement is not Return
+            // Append implicit empty return if last statement is not Return.
             if let Some(last) = body.last() {
                 if !matches!(last, AstNode::Return { .. }) {
                     body.push(AstNode::Return { values: vec![] });
@@ -91,11 +206,12 @@ impl SemanticAnalyzer {
             }
         }
 
+        // Save outer symbol table and switch to local scope for function analysis.
         let outer_symbol_table = Some(self.symbol_table.clone());
         self.outer_symbol_table = outer_symbol_table;
         self.symbol_table = local_scope; // only params visible
 
-        // Check if function has return statement and if it matches the return type
+        // Check for required return statements and verify their types.
         if let Some(ret_type) = return_type.as_ref() {
             if *ret_type != TypeNode::Void {
                 self.ensure_has_return(body, name)?;
@@ -103,7 +219,7 @@ impl SemanticAnalyzer {
             }
         }
 
-        // Analyze function body with **isolated scope**
+        // Analyze function body with isolated scope.
         self.analyze_program(body)?;
 
         println!(
@@ -111,7 +227,7 @@ impl SemanticAnalyzer {
             name, self.outer_symbol_table
         );
 
-        // Restore outer scope
+        // Restore outer scope after function analysis.
         if let Some(outer) = self.outer_symbol_table.take() {
             self.symbol_table = outer;
         }
@@ -125,6 +241,10 @@ impl SemanticAnalyzer {
     }
 
     /// Ensure function has at least one return statement
+    /// Ensures that a function body contains at least one return statement.
+    ///
+    /// Used for functions that declare a non-void return type.
+    /// Returns an error if no return statement is found.
     fn ensure_has_return(&self, body: &Vec<AstNode>, fn_name: &str) -> Result<(), SemanticError> {
         if !self.has_return_statement(body) {
             return Err(SemanticError::MissingFunctionReturn {
@@ -134,7 +254,42 @@ impl SemanticAnalyzer {
         Ok(())
     }
 
-    /// Verify each return statement matches the expected return type
+    /// Checks if any node in a list contains a return statement.
+    /// Used to recursively scan function bodies, blocks, and conditional branches
+    /// to ensure that a return statement exists where required.
+    fn has_return_statement(&self, nodes: &Vec<AstNode>) -> bool {
+        for node in nodes {
+            match node {
+                AstNode::Return { .. } => return true,
+                AstNode::ConditionalStmt {
+                    then_block,
+                    else_branch,
+                    ..
+                } => {
+                    // Both branches must have a return for the function to be considered as returning.
+                    let then_has = self.has_return_statement(then_block);
+                    let else_has = else_branch
+                        .as_ref()
+                        .map(|b| self.has_return_statement(&vec![*b.clone()]))
+                        .unwrap_or(false);
+                    if then_has && else_has {
+                        return true;
+                    }
+                }
+                AstNode::Block(inner_nodes) => {
+                    if self.has_return_statement(inner_nodes) {
+                        return true;
+                    }
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+
+    /// Verifies that each return statement in a function matches the expected return type.
+    /// Recursively checks all return statements in the function body, including those in
+    /// conditional branches and blocks. Returns an error if any return statement has a type mismatch.
     fn verify_return_types(
         &self,
         nodes: &Vec<AstNode>,
@@ -174,7 +329,9 @@ impl SemanticAnalyzer {
         Ok(())
     }
 
-    /// Verify a single return statement matches the expected type
+    /// Verifies a single return statement matches the expected type.
+    /// Handles both tuple and single-value returns. Returns an error if the number of returned
+    /// values or their types do not match the function's declared return type.
     fn verify_single_return(
         &self,
         values: &Vec<AstNode>,
@@ -183,6 +340,7 @@ impl SemanticAnalyzer {
     ) -> Result<(), SemanticError> {
         match expected {
             TypeNode::Tuple(expected_vec) => {
+                // For tuple returns, check length and types of each element.
                 if values.len() != expected_vec.len() {
                     return Err(SemanticError::ReturnTypeMismatch {
                         function: fn_name.to_string(),
@@ -214,6 +372,7 @@ impl SemanticAnalyzer {
             }
             _ => {
                 // single return
+                // For single-value returns, check there is exactly one value and its type matches.
                 if values.len() != 1 {
                     return Err(SemanticError::ReturnTypeMismatch {
                         function: fn_name.to_string(),
@@ -245,109 +404,12 @@ impl SemanticAnalyzer {
         Ok(())
     }
 
-    pub fn analyze_let_decl(&mut self, node: &mut AstNode) -> Result<(), SemanticError> {
-        match node {
-            AstNode::LetDecl {
-                mutable,
-                type_annotation,
-                pattern,
-                value,
-                is_ref_counted,
-            } => {
-                // Prevent assignment from variable without type info
-                // if type_annotation.is_none() && matches!(**value, AstNode::Identifier(_)) {
-                //     return Err(SemanticError::VarTypeMismatch(TypeMismatch {
-                //         expected: TypeNode::Void,
-                //         found: TypeNode::Void,
-                //         value: None,
-                //     }));
-                // }
-
-                // Determine the type of the RHS (value being assigned)
-                let rhs_type = if let Some(annotated_type) = type_annotation.as_ref() {
-                    // If the variable has a type annotation, check that RHS matches it
-                    let rhs_type = self.infer_type(value)?;
-                    if rhs_type != *annotated_type {
-                        return Err(SemanticError::VarTypeMismatch(TypeMismatch {
-                            expected: annotated_type.clone(),
-                            found: rhs_type,
-                            value: Some(value.clone()),
-                        }));
-                    }
-                    annotated_type.clone()
-                } else {
-                    // No annotation: infer type from the value
-                    self.infer_type(value)?
-                };
-
-                // Update the type annotation to reflect the inferred type if it was missing
-                *type_annotation = Some(rhs_type.clone());
-
-                // ✅ Update AST with reference counting info
-                // println!("Before: {:?}", is_ref_counted);
-                *is_ref_counted = Some(Self::should_be_rc(&rhs_type));
-                // println!("After: {:?}", is_ref_counted);
-
-                // Flatten the LHS pattern
-                let mut targets = Vec::new();
-                Self::flatten_pattern(pattern, &mut targets);
-
-                // If RHS is a tuple, each element must match a pattern
-                // Otherwise, treat RHS as a single-element list
-                let rhs_types = match &rhs_type {
-                    TypeNode::Tuple(types) => types.clone(),
-                    t => vec![t.clone()],
-                };
-
-                // Check that the number of LHS patterns matches the number of RHS types
-                if rhs_types.len() != targets.len() {
-                    return Err(SemanticError::TupleAssignmentMismatch {
-                        expected: rhs_types.len(),
-                        found: targets.len(),
-                    });
-                }
-
-                // Bind each pattern to its type in the symbol table
-                for (target, ty) in targets.iter().zip(rhs_types.iter()) {
-                    match target {
-                        // Identifier: add to symbol table, mark mutability
-                        crate::parser::ast::Pattern::Identifier(name) => {
-                            // Prevent redeclaration
-                            if self.symbol_table.contains_key(name) {
-                                return Err(SemanticError::VariableRedeclaration(NamedError {
-                                    name: name.clone(),
-                                }));
-                            }
-                            // Skip wildcards
-                            if name != "_" {
-                                self.symbol_table.insert(
-                                    name.clone(),
-                                    SymbolInfo {
-                                        ty: ty.clone(),
-                                        mutable: *mutable,
-                                        is_ref_counted: Self::should_be_rc(&ty),
-                                    },
-                                );
-                            }
-                        }
-                        // Wildcard: allowed but not stored
-                        crate::parser::ast::Pattern::Wildcard => {}
-                        // Anything else: invalid pattern
-                        _ => {
-                            return Err(SemanticError::InvalidAssignmentTarget {
-                                target: format!("{:?}", target),
-                            });
-                        }
-                    }
-                }
-                Ok(())
-            }
-            _ => Ok(()),
-        }
-    }
-
+    /// This function checks for redeclaration of struct names, validates field names and types,
+    /// ensures no duplicate fields, and adds the struct type to the symbol table.
+    /// Returns semantic errors for any violations.
     pub fn analyze_struct(&mut self, node: &AstNode) -> Result<(), SemanticError> {
         if let AstNode::StructDecl { name, fields } = node {
+            // Prevent redeclaration of struct names.
             if self.symbol_table.contains_key(name) {
                 return Err(SemanticError::StructRedeclaration(NamedError {
                     name: name.clone(),
@@ -356,6 +418,7 @@ impl SemanticAnalyzer {
 
             let mut field_map = HashMap::new();
             for (field_name, field_type) in fields {
+                // Ensure no duplicate field names.
                 if field_map.contains_key(field_name) {
                     return Err(SemanticError::DuplicateField {
                         struct_name: name.clone(),
@@ -366,6 +429,7 @@ impl SemanticAnalyzer {
             }
 
             // Insert struct type into the symbol table
+            // Insert struct type into the symbol table.
             self.symbol_table.insert(
                 name.clone(),
                 SymbolInfo {
@@ -378,9 +442,12 @@ impl SemanticAnalyzer {
         Ok(())
     }
 
-    /// Analyze an enum declaration
+    /// This function checks for redeclaration of enum names, validates variant names and types,
+    /// ensures no duplicate variants, and adds the enum type to the symbol table.
+    /// Returns semantic errors for any violations.
     pub fn analyze_enum(&mut self, node: &AstNode) -> Result<(), SemanticError> {
         if let AstNode::EnumDecl { name, variants } = node {
+            // Prevent redeclaration of enum names.
             if self.symbol_table.contains_key(name) {
                 return Err(SemanticError::EnumRedeclaration(NamedError {
                     name: name.clone(),
@@ -389,6 +456,7 @@ impl SemanticAnalyzer {
 
             let mut variant_map = HashMap::new();
             for (variant_name, variant_type) in variants {
+                // Ensure no duplicate variant names.
                 if variant_map.contains_key(variant_name) {
                     return Err(SemanticError::DuplicateEnumVariant {
                         enum_name: name.clone(),
@@ -398,7 +466,7 @@ impl SemanticAnalyzer {
                 variant_map.insert(variant_name.clone(), variant_type.clone());
             }
 
-            // Insert enum type into the symbol table
+            // Insert enum type into the symbol table.
             self.symbol_table.insert(
                 name.clone(),
                 SymbolInfo {
