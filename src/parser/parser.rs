@@ -89,11 +89,11 @@ impl<'a> Parser<'a> {
 
                 // Statements
                 TokenType::If => self.parse_conditional_stmt(),
+                TokenType::For => self.parse_for_stmt(),
                 TokenType::Return => self.parse_return(),
-                TokenType::Print => self.parse_print(),
                 TokenType::Break => self.parse_break(),
                 TokenType::Continue => self.parse_continue(),
-                TokenType::For => self.parse_for_stmt(),
+                TokenType::Print => self.parse_print(),
 
                 // Handles statements that start with an identifier.
                 // These are NOT declarations (like 'let')

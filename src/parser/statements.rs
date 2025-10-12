@@ -3,41 +3,44 @@ use crate::parser::ast::{AstNode, Pattern};
 use crate::parser::{ParseError, ParseResult, Parser};
 
 impl<'a> Parser<'a> {
-    /// Parses an assignment statement.
-    /// Supports tuple destructuring on the left-hand side (e.g., `a, b = ...;`).
-    /// Uses parse_comma_separated for LHS patterns, then expects '=' and parses the RHS expression.
-    /// Returns an Assignment AST node.
-    pub fn parse_assignment(&mut self) -> ParseResult<AstNode> {
-        // Parse comma-separated patterns for the left-hand side
-        let patterns = self.parse_comma_separated(|p| p.parse_pattern(), TokenType::Eq)?;
+    /// Syntax:
+    ///   - `if condition { ... }`
+    ///   - `if condition { ... } else { ... }`
+    ///   - `if condition { ... } else if ...`
+    /// Supports nested else-if branches recursively.
+    pub fn parse_conditional_stmt(&mut self) -> ParseResult<AstNode> {
+        self.expect(TokenType::If)?;
 
-        // Only allow assignment to a single identifier (not tuple, not wildcard)
-        // Ex., let a, _ = ...; Allowed
-        if patterns.len() != 1 {
-            return Err(ParseError::UnexpectedToken(
-                "Tuple assignment is only allowed in 'let' declarations".into(),
-            ));
-        }
+        // Parse condition expression
+        let condition = self.parse_expression()?;
 
-        let lhs_pattern = patterns.into_iter().next().unwrap();
-        match lhs_pattern {
-            Pattern::Identifier(_) => {}
-            _ => {
-                // Disallow assignment to wildcard or tuple
-                // Ex., a, _ = ...; Not allowed without let
-                return Err(ParseError::UnexpectedToken(
-                    "Only single-variable assignment is allowed without 'let'".into(),
-                ));
+        // Parse then block
+        let then_block = self.parse_braced_block()?; // parse statements until '}'
+
+        // Parse optional else or else-if branch
+        let mut else_branch = None;
+        if let Some(tok) = self.peek() {
+            if tok.kind == TokenType::Else {
+                self.advance(); // consume 'else'
+
+                if let Some(next) = self.peek() {
+                    if next.kind == TokenType::If {
+                        // else if: recursively parse another conditional
+                        let elseif = self.parse_conditional_stmt()?;
+                        else_branch = Some(Box::new(elseif));
+                    } else {
+                        // else: parse block
+                        let else_block = self.parse_braced_block()?;
+                        else_branch = Some(Box::new(AstNode::Block(else_block)));
+                    }
+                }
             }
         }
 
-        self.expect(TokenType::Eq)?;
-        let rhs = self.parse_expression()?;
-        self.expect(TokenType::Semi)?;
-
-        Ok(AstNode::Assignment {
-            pattern: lhs_pattern,
-            value: Box::new(rhs),
+        Ok(AstNode::ConditionalStmt {
+            condition: Box::new(condition),
+            then_block,
+            else_branch,
         })
     }
 
@@ -86,45 +89,28 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// Syntax:
-    ///   - `if condition { ... }`
-    ///   - `if condition { ... } else { ... }`
-    ///   - `if condition { ... } else if ...`
-    /// Supports nested else-if branches recursively.
-    pub fn parse_conditional_stmt(&mut self) -> ParseResult<AstNode> {
-        self.expect(TokenType::If)?;
+    /// Parses a return statement.
+    /// Syntax: `return expr1, expr2, ...;`
+    /// Consumes 'return', then parses one or more expressions separated by commas, ending with a semicolon.
+    pub fn parse_return(&mut self) -> ParseResult<AstNode> {
+        self.expect(TokenType::Return)?; // consume 'return'
 
-        // Parse condition expression
-        let condition = self.parse_expression()?;
+        let mut values = Vec::new();
 
-        // Parse then block
-        let then_block = self.parse_braced_block()?; // parse statements until '}'
+        loop {
+            let expr = self.parse_expression()?;
+            values.push(expr);
 
-        // Parse optional else or else-if branch
-        let mut else_branch = None;
-        if let Some(tok) = self.peek() {
-            if tok.kind == TokenType::Else {
-                self.advance(); // consume 'else'
-
-                if let Some(next) = self.peek() {
-                    if next.kind == TokenType::If {
-                        // else if: recursively parse another conditional
-                        let elseif = self.parse_conditional_stmt()?;
-                        else_branch = Some(Box::new(elseif));
-                    } else {
-                        // else: parse block
-                        let else_block = self.parse_braced_block()?;
-                        else_branch = Some(Box::new(AstNode::Block(else_block)));
-                    }
+            match self.peek() {
+                Some(tok) if tok.kind == TokenType::Comma => {
+                    self.advance(); // consume ',' and continue parsing next expression
                 }
+                _ => break, // no more expressions
             }
         }
 
-        Ok(AstNode::ConditionalStmt {
-            condition: Box::new(condition),
-            then_block,
-            else_branch,
-        })
+        self.expect(TokenType::Semi)?; // consume ';' at the end
+        Ok(AstNode::Return { values })
     }
 
     /// Syntax: `break;`
@@ -159,28 +145,42 @@ impl<'a> Parser<'a> {
         Ok(AstNode::Print { exprs: args })
     }
 
-    /// Parses a return statement.
-    /// Syntax: `return expr1, expr2, ...;`
-    /// Consumes 'return', then parses one or more expressions separated by commas, ending with a semicolon.
-    pub fn parse_return(&mut self) -> ParseResult<AstNode> {
-        self.expect(TokenType::Return)?; // consume 'return'
+    /// Parses an assignment statement.
+    /// Supports tuple destructuring on the left-hand side (e.g., `a, b = ...;`).
+    /// Uses parse_comma_separated for LHS patterns, then expects '=' and parses the RHS expression.
+    /// Returns an Assignment AST node.
+    pub fn parse_assignment(&mut self) -> ParseResult<AstNode> {
+        // Parse comma-separated patterns for the left-hand side
+        let patterns = self.parse_comma_separated(|p| p.parse_pattern(), TokenType::Eq)?;
 
-        let mut values = Vec::new();
+        // Only allow assignment to a single identifier (not tuple, not wildcard)
+        // Ex., let a, _ = ...; Allowed
+        if patterns.len() != 1 {
+            return Err(ParseError::UnexpectedToken(
+                "Tuple assignment is only allowed in 'let' declarations".into(),
+            ));
+        }
 
-        loop {
-            let expr = self.parse_expression()?;
-            values.push(expr);
-
-            match self.peek() {
-                Some(tok) if tok.kind == TokenType::Comma => {
-                    self.advance(); // consume ',' and continue parsing next expression
-                }
-                _ => break, // no more expressions
+        let lhs_pattern = patterns.into_iter().next().unwrap();
+        match lhs_pattern {
+            Pattern::Identifier(_) => {}
+            _ => {
+                // Disallow assignment to wildcard or tuple
+                // Ex., a, _ = ...; Not allowed without let
+                return Err(ParseError::UnexpectedToken(
+                    "Only single-variable assignment is allowed without 'let'".into(),
+                ));
             }
         }
 
-        self.expect(TokenType::Semi)?; // consume ';' at the end
-        Ok(AstNode::Return { values })
+        self.expect(TokenType::Eq)?;
+        let rhs = self.parse_expression()?;
+        self.expect(TokenType::Semi)?;
+
+        Ok(AstNode::Assignment {
+            pattern: lhs_pattern,
+            value: Box::new(rhs),
+        })
     }
 
     /// Parses a pattern for use in assignments, for loops, and match arms.
