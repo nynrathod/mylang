@@ -1,5 +1,3 @@
-// mir/mod.rs
-
 pub mod builder;
 pub mod declarations;
 pub mod expresssions;

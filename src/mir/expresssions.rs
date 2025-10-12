@@ -4,67 +4,65 @@ use crate::{
     parser::ast::{AstNode, TypeNode},
 };
 
-/// Convert AST expressions to MIR temporaries
-/// Returns the temporary variable holding the expression result
 pub fn build_expression(builder: &mut MirBuilder, expr: &AstNode, block: &mut MirBlock) -> String {
     match expr {
-        // Literals create constant instructions
         AstNode::NumberLiteral(n) => {
             let tmp = builder.next_tmp();
             block.instrs.push(MirInstr::ConstInt {
                 name: tmp.clone(),
                 value: *n,
             });
+
             tmp
         }
+
         AstNode::BoolLiteral(b) => {
             let tmp = builder.next_tmp();
             block.instrs.push(MirInstr::ConstBool {
                 name: tmp.clone(),
                 value: *b,
             });
+
             tmp
         }
+
         AstNode::StringLiteral(s) => {
             let tmp = builder.next_tmp();
             block.instrs.push(MirInstr::ConstString {
                 name: tmp.clone(),
                 value: s.clone(),
             });
+
             tmp
         }
 
-        // Variables reference existing names directly
         AstNode::Identifier(name) => name.clone(),
 
-        // Binary operations become MIR binary ops
         AstNode::BinaryExpr { left, op, right } => {
-            // Handle range expressions differently - they shouldn't be evaluated as regular binary ops
+            // Special handling for range expressions (.., ..=) used in for loops.
             match op {
                 TokenType::RangeExc | TokenType::RangeInc => {
-                    // Range expressions should only be handled in specific contexts (for loops)
-                    // If we encounter them here, create a range object
                     let start_tmp = build_expression(builder, left, block);
                     let end_tmp = build_expression(builder, right, block);
                     let range_tmp = builder.next_tmp();
 
-                    // Add a range creation instruction
                     block.instrs.push(MirInstr::RangeCreate {
                         name: range_tmp.clone(),
                         start: start_tmp,
                         end: end_tmp,
                         inclusive: matches!(op, TokenType::RangeInc),
                     });
+
                     range_tmp
                 }
+
                 _ => {
-                    // Regular binary operations
+                    // Regular binary operations (add, sub, mul, div, etc.).
                     let lhs_tmp = build_expression(builder, left, block);
                     let rhs_tmp = build_expression(builder, right, block);
                     let dest_tmp = builder.next_tmp();
-
                     if *op == TokenType::Plus {
-                        // String concatenation if both operands are string literals
+                        // String concatenation if both operands are string literals.
                         if matches!(&**left, AstNode::StringLiteral(_))
                             && matches!(&**right, AstNode::StringLiteral(_))
                         {
@@ -74,7 +72,7 @@ pub fn build_expression(builder: &mut MirBuilder, expr: &AstNode, block: &mut Mi
                                 right: rhs_tmp,
                             });
                         } else {
-                            // Otherwise assume integer addition
+                            // Otherwise, assume integer addition.
                             block.instrs.push(MirInstr::BinaryOp(
                                 "add".to_string(),
                                 dest_tmp.clone(),
@@ -83,7 +81,7 @@ pub fn build_expression(builder: &mut MirBuilder, expr: &AstNode, block: &mut Mi
                             ));
                         }
                     } else {
-                        // Other binary operators
+                        // Other binary operators (sub, mul, div, comparisons, etc.).
                         let op_str = match op {
                             TokenType::Minus => "sub",
                             TokenType::Star => "mul",
@@ -118,19 +116,22 @@ pub fn build_expression(builder: &mut MirBuilder, expr: &AstNode, block: &mut Mi
                 let arg_tmp = build_expression(builder, arg, block);
                 arg_tmps.push(arg_tmp);
             }
+
             let dest_tmp = builder.next_tmp();
             let func_name = match &**func {
                 AstNode::Identifier(name) => name.clone(),
                 _ => {
-                    // If func is an expression, evaluate it
+                    // If func is an expression, evaluate it and use its result as the function name.
                     build_expression(builder, func, block)
                 }
             };
+
             block.instrs.push(MirInstr::Call {
                 dest: vec![dest_tmp.clone()],
                 func: func_name,
                 args: arg_tmps,
             });
+
             dest_tmp
         }
 
@@ -140,11 +141,13 @@ pub fn build_expression(builder: &mut MirBuilder, expr: &AstNode, block: &mut Mi
                 let elem_tmp = build_expression(builder, elem, block);
                 tmp_elements.push(elem_tmp);
             }
+
             let tmp = builder.next_tmp();
             block.instrs.push(MirInstr::Array {
                 name: tmp.clone(),
                 elements: tmp_elements,
             });
+
             tmp
         }
 
@@ -155,16 +158,19 @@ pub fn build_expression(builder: &mut MirBuilder, expr: &AstNode, block: &mut Mi
                 let val_tmp = build_expression(builder, val_expr, block);
                 map_entries.push((key_tmp, val_tmp));
             }
+
             let tmp = builder.next_tmp();
             block.instrs.push(MirInstr::Map {
                 name: tmp.clone(),
                 entries: map_entries,
             });
+
             tmp
         }
 
         _ => {
-            // For unhandled expressions, create a placeholder temporary
+            // For unhandled expressions, create a placeholder temporary.
+            // This is a safeguard for future AST node types.
             builder.next_tmp()
         }
     }

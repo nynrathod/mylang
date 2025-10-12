@@ -14,10 +14,10 @@ pub struct MirProgram {
 /// A single function in MIR form
 #[derive(Debug, Clone)]
 pub struct MirFunction {
-    pub name: String,                // Function identifier
-    pub params: Vec<String>,         // Parameter names
-    pub return_type: Option<String>, // Return type (None = void)
-    pub blocks: Vec<MirBlock>,       // Basic blocks in SSA form
+    pub name: String, // Function identifier
+    pub params: Vec<String>,
+    pub return_type: Option<String>,
+    pub blocks: Vec<MirBlock>,
 }
 
 /// A basic block - sequence of instructions with single entry/exit
@@ -26,6 +26,12 @@ pub struct MirBlock {
     pub label: String,                // Block identifier
     pub instrs: Vec<MirInstr>,        // Sequential instructions
     pub terminator: Option<MirInstr>, // Block terminator (jump/return)
+}
+
+pub struct CodegenBlock<'a> {
+    pub label: &'a str,
+    pub instrs: &'a [MirInstr],
+    pub terminator: Option<MirTerminator>, // use real terminator here
 }
 
 /// MIR instruction types - covers all operations in the language
@@ -63,7 +69,7 @@ pub enum MirInstr {
         entries: Vec<(String, String)>,
     },
 
-    // Range operations (NEW)
+    // Range operations
     RangeCreate {
         name: String,
         start: String,
@@ -72,6 +78,7 @@ pub enum MirInstr {
     },
 
     // Collection operations
+    // Get and Set - read and write value
     ArrayLen {
         name: String,
         array: String,
@@ -186,16 +193,6 @@ pub enum MirInstr {
         variant: String,
     },
 
-    // Memory and reference operations (for future use)
-    Load {
-        name: String,
-        address: String,
-    },
-    Store {
-        address: String,
-        value: String,
-    },
-
     /// Range-based for loop: for i in 0..10 or for i in 0..=10
     ForRange {
         var: String,        // Loop variable (e.g., "i")
@@ -277,12 +274,6 @@ pub enum MirInstr {
         value: String,
         cond_block: String,
     },
-}
-
-pub struct CodegenBlock<'a> {
-    pub label: &'a str,
-    pub instrs: &'a [MirInstr],
-    pub terminator: Option<MirTerminator>, // use real terminator here
 }
 
 /// MIR Terminators - special instructions that end a basic block

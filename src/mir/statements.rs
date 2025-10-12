@@ -4,15 +4,58 @@ use crate::mir::expresssions::build_expression;
 use crate::mir::{MirBlock, MirInstr};
 use crate::parser::ast::{AstNode, Pattern};
 
-/// Convert AST statements to MIR instructions
-/// Handles statements, delegates complex control flow
 pub fn build_statement(builder: &mut MirBuilder, stmt: &AstNode, block: &mut MirBlock) {
     match stmt {
-        // Handle variable assignments
+        // Handle variable declaration (`let` statement).
+        // Supports both single variable and tuple destructuring patterns.
+        AstNode::LetDecl {
+            pattern,
+            value,
+            mutable,
+            is_ref_counted,
+            ..
+        } => {
+            // Build MIR for the right-hand side expression.
+            let value_tmp = build_expression(builder, value, block);
+
+            match pattern {
+                // Simple variable assignment.
+                Pattern::Identifier(name) => {
+                    block.instrs.push(MirInstr::Assign {
+                        name: name.clone(),
+                        value: value_tmp,
+                        mutable: *mutable,
+                    });
+                }
+                // Tuple destructuring: let (a, b) = expr;
+                Pattern::Tuple(patterns) => {
+                    for (i, pattern) in patterns.iter().enumerate() {
+                        if let Pattern::Identifier(name) = pattern {
+                            // Extract each tuple element into a temporary variable.
+                            block.instrs.push(MirInstr::TupleExtract {
+                                name: builder.next_tmp(),
+                                source: value_tmp.clone(),
+                                index: i,
+                            });
+                            block.instrs.push(MirInstr::Assign {
+                                name: name.clone(),
+                                value: builder.next_tmp(),
+                                mutable: *mutable,
+                            });
+                        }
+                    }
+                }
+                // Other patterns (wildcards, structs) can be added here in the future.
+                _ => {}
+            }
+        }
+
+        // Handle assignment statements (e.g., x = expr, (a, b) = func()).
         AstNode::Assignment { pattern, value } => {
             let value_tmp = build_expression(builder, value, block);
 
             match pattern {
+                // Simple variable assignment.
                 Pattern::Identifier(name) => {
                     block.instrs.push(MirInstr::Assign {
                         name: name.clone(),
@@ -20,35 +63,72 @@ pub fn build_statement(builder: &mut MirBuilder, stmt: &AstNode, block: &mut Mir
                         mutable: true,
                     });
                 }
+                // Tuple destructuring assignment.
                 Pattern::Tuple(patterns) => {
                     for (i, pattern) in patterns.iter().enumerate() {
                         if let Pattern::Identifier(name) = pattern {
-                            let extract_tmp = builder.next_tmp();
+                            // Extract each tuple element into a temporary variable.
                             block.instrs.push(MirInstr::TupleExtract {
-                                name: extract_tmp.clone(),
+                                name: builder.next_tmp(),
                                 source: value_tmp.clone(),
                                 index: i,
                             });
                             block.instrs.push(MirInstr::Assign {
                                 name: name.clone(),
-                                value: extract_tmp,
+                                value: builder.next_tmp(),
                                 mutable: true,
                             });
                         }
                     }
                 }
+                // Other patterns can be added here in the future.
                 _ => {}
             }
         }
 
-        // Handle if/else statements
+        // Handle struct declarations (type definitions, not instances).
+        AstNode::StructDecl { name, fields } => {
+            // Create a placeholder instance showing the structure.
+            let tmp = builder.next_tmp();
+            let field_vals: Vec<(String, String)> = fields
+                .iter()
+                .map(|(fname, _typ)| {
+                    let val_tmp = builder.next_tmp();
+                    (fname.clone(), val_tmp)
+                })
+                .collect();
+
+            block.instrs.push(MirInstr::StructInit {
+                name: tmp,
+                struct_name: name.clone(),
+                fields: field_vals,
+            });
+        }
+
+        // Handle enum declarations (type definitions, not instances).
+        AstNode::EnumDecl { name, variants } => {
+            for (variant_name, opt_type) in variants {
+                let tmp = builder.next_tmp();
+                let value_tmp = opt_type.as_ref().map(|_| builder.next_tmp());
+                block.instrs.push(MirInstr::EnumInit {
+                    name: tmp,
+                    enum_name: name.clone(),
+                    variant: variant_name.clone(),
+                    value: value_tmp,
+                });
+            }
+        }
+
+        // Handle conditional statements (if/else).
         AstNode::ConditionalStmt {
             condition,
             then_block,
             else_branch,
         } => {
+            // Build MIR for the condition expression.
             let cond_tmp = build_expression(builder, condition, block);
 
+            // Generate labels for then, else, and exit blocks.
             let then_label = builder.next_block();
             let else_label = builder.next_block();
             let end_label = builder.next_block();
@@ -63,7 +143,7 @@ pub fn build_statement(builder: &mut MirBuilder, stmt: &AstNode, block: &mut Mir
                 },
             });
 
-            // Then block with scope tracking
+            // Then block with scope tracking for reference counting.
             builder.enter_scope();
             let mut then_mir_block = MirBlock {
                 label: then_label,
@@ -116,70 +196,35 @@ pub fn build_statement(builder: &mut MirBuilder, stmt: &AstNode, block: &mut Mir
             }
         }
 
-        AstNode::LetDecl {
-            pattern,
-            value,
-            mutable,
-            is_ref_counted,
-            ..
-        } => {
-            let value_tmp = build_expression(builder, value, block);
-
-            match pattern {
-                Pattern::Identifier(name) => {
-                    block.instrs.push(MirInstr::Assign {
-                        name: name.clone(),
-                        value: value_tmp,
-                        mutable: *mutable,
-                    });
-                }
-                Pattern::Tuple(patterns) => {
-                    // Handle tuple destructuring in let statements
-                    for (i, pattern) in patterns.iter().enumerate() {
-                        if let Pattern::Identifier(name) = pattern {
-                            let extract_tmp = builder.next_tmp();
-                            block.instrs.push(MirInstr::TupleExtract {
-                                name: extract_tmp.clone(),
-                                source: value_tmp.clone(),
-                                index: i,
-                            });
-                            block.instrs.push(MirInstr::Assign {
-                                name: name.clone(),
-                                value: extract_tmp,
-                                mutable: *mutable,
-                            });
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-
+        // Handle return statements.
         AstNode::Return { values } => {
             let mut ret_vals = vec![];
             for val in values {
+                // Build MIR for each return value expression.
                 let ret_tmp = build_expression(builder, val, block);
                 ret_vals.push(ret_tmp);
             }
             block.terminator = Some(MirInstr::Return { values: ret_vals });
         }
 
-        // Handle standalone expressions (like function calls for their side effects)
+        // Handle standalone expressions (like function calls for their side effects).
         AstNode::BinaryExpr { .. } | AstNode::FunctionCall { .. } => {
-            // Evaluate the expression but don't necessarily store the result
+            // Evaluate the expression but don't necessarily store the result.
             build_expression(builder, stmt, block);
         }
 
+        // Handle print statements.
         AstNode::Print { exprs } => {
             let mut vals = vec![];
             for expr in exprs {
+                // Build MIR for each print argument.
                 let val_tmp = build_expression(builder, expr, block);
                 vals.push(val_tmp);
             }
             block.instrs.push(MirInstr::Print { values: vals });
         }
 
-        // Enhanced for loop handling
+        // Handle break statement in loops.
         AstNode::Break => {
             if let Some(loop_ctx) = builder.current_loop() {
                 block.terminator = Some(MirInstr::Jump {
@@ -190,7 +235,7 @@ pub fn build_statement(builder: &mut MirBuilder, stmt: &AstNode, block: &mut Mir
             }
         }
 
-        // Handle continue statement
+        // Handle continue statement in loops.
         AstNode::Continue => {
             if let Some(loop_ctx) = builder.current_loop() {
                 block.terminator = Some(MirInstr::Jump {
@@ -201,24 +246,26 @@ pub fn build_statement(builder: &mut MirBuilder, stmt: &AstNode, block: &mut Mir
             }
         }
 
-        // Enhanced for loop handling with break/continue support
+        // Handle for loop statements, including infinite loops and loops with iterable.
         AstNode::ForLoopStmt {
             pattern,
             iterable,
             body,
         } => {
+            // Infinite loop: for { ... }
             if iterable.is_none() {
                 let loop_header = builder.next_block();
                 let loop_body = builder.next_block();
                 let loop_end = builder.next_block();
 
+                // Enter loop context for break/continue handling.
                 builder.enter_loop(loop_end.clone(), loop_header.clone());
 
                 block.terminator = Some(MirInstr::Jump {
                     target: loop_header.clone(),
                 });
 
-                // Header block jumps directly to body
+                // Header block jumps directly to body.
                 let mut header_block = MirBlock {
                     label: loop_header.clone(),
                     instrs: vec![],
@@ -227,7 +274,7 @@ pub fn build_statement(builder: &mut MirBuilder, stmt: &AstNode, block: &mut Mir
                     }),
                 };
 
-                // Body block executes statements, then jumps back to header
+                // Body block executes statements, then jumps back to header.
                 let mut body_block = MirBlock {
                     label: loop_body.clone(),
                     instrs: vec![],
@@ -536,36 +583,8 @@ pub fn build_statement(builder: &mut MirBuilder, stmt: &AstNode, block: &mut Mir
             builder.exit_loop(); // Important: exit loop context
         }
 
-        AstNode::StructDecl { name, fields } => {
-            let tmp = builder.next_tmp();
-            let field_vals: Vec<(String, String)> = fields
-                .iter()
-                .map(|(fname, _typ)| {
-                    let val_tmp = builder.next_tmp();
-                    (fname.clone(), val_tmp)
-                })
-                .collect();
-
-            block.instrs.push(MirInstr::StructInit {
-                name: tmp,
-                struct_name: name.clone(),
-                fields: field_vals,
-            });
-        }
-
-        AstNode::EnumDecl { name, variants } => {
-            for (variant_name, opt_type) in variants {
-                let tmp = builder.next_tmp();
-                let value_tmp = opt_type.as_ref().map(|_| builder.next_tmp());
-                block.instrs.push(MirInstr::EnumInit {
-                    name: tmp,
-                    enum_name: name.clone(),
-                    variant: variant_name.clone(),
-                    value: value_tmp,
-                });
-            }
-        }
-
+        // For any unhandled AST node types, do nothing.
+        // This branch is a safeguard for future AST node types.
         _ => {}
     }
 }
