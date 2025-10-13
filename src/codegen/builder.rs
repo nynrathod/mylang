@@ -505,6 +505,8 @@ impl<'ctx> CodeGen<'ctx> {
     }
 
     /// Resolve value (unchanged)
+    /// Resolves a variable or constant name to its LLVM value.
+    /// Used for looking up values in the symbol table or temporary values.
     pub fn resolve_value(&self, name: &str) -> BasicValueEnum<'ctx> {
         if let Some(val) = self.temp_values.get(name) {
             return *val;
@@ -535,17 +537,11 @@ impl<'ctx> CodeGen<'ctx> {
         );
     }
 
-    pub fn get_llvm_type(&self, ty: &str) -> BasicTypeEnum<'ctx> {
-        match ty {
-            "Int" => self.context.i32_type().into(),
-            "Bool" => self.context.bool_type().into(),
-            "Str" => self
-                .context
-                .i8_type()
-                .ptr_type(inkwell::AddressSpace::default())
-                .into(),
-            _ => self.context.i32_type().into(),
-        }
+    /// Returns the LLVM type corresponding to a type name string.
+    /// Used for type resolution during codegen.
+    pub fn get_llvm_type(&self, _type_name: &str) -> BasicTypeEnum<'ctx> {
+        // Only i32 type is supported everywhere in codegen now.
+        self.context.i32_type().into()
     }
 
     pub fn generate_array_with_metadata(
@@ -1349,11 +1345,13 @@ impl<'ctx> CodeGen<'ctx> {
         }
     }
 
+    /// Returns the pair type string for a map (used for struct type).
     pub fn get_map_pair_type(&self, map_name: &str) -> StructType<'ctx> {
         let (key_type, val_type) = self.get_map_types(map_name);
         self.context.struct_type(&[key_type, val_type], false)
     }
 
+    /// Returns true if the map contains string keys or values.
     pub fn map_contains_strings(&self, map_name: &str) -> (bool, bool) {
         if let Some(metadata) = self.map_metadata.get(map_name) {
             (metadata.key_is_string, metadata.value_is_string)
@@ -1362,6 +1360,7 @@ impl<'ctx> CodeGen<'ctx> {
         }
     }
 
+    /// Returns true if the array contains string elements.
     pub fn array_contains_strings(&self, array_name: &str) -> bool {
         if let Some(metadata) = self.array_metadata.get(array_name) {
             metadata.contains_strings

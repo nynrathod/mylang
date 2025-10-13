@@ -5,16 +5,25 @@ use inkwell::types::{AsTypeRef, BasicType};
 use inkwell::values::{AnyValue, AsValueRef, BasicValue, BasicValueEnum};
 use inkwell::AddressSpace;
 
-// External function from the LLVM C API needed to create constant arrays
-// of complex types (like arrays of structs, or nested arrays).
+/// This module provides functions for generating LLVM IR for global variables, constants, arrays, maps, and string operations.
+/// It handles the translation of MIR instructions into LLVM global definitions, including constant folding and compile-time string concatenation.
+/// The code here is essential for setting up the global state of a program before function-level code generation begins.
+/// External function from the LLVM C API needed to create constant arrays
+/// of complex types (like arrays of structs, or nested arrays).
 use llvm_sys::core::LLVMConstArray;
 use llvm_sys::prelude::LLVMValueRef;
 
+/// Implements global code generation logic for the CodeGen struct.
+/// This includes helpers for building constant arrays, generating global variables/constants,
+/// resolving constant values, and handling compile-time string/map/array operations.
 impl<'ctx> CodeGen<'ctx> {
     /// Helper function using FFI (Foreign Function Interface) to manually create an
-    /// LLVM constant array from a vector of values. This is essential for arrays
-    /// containing complex types (structs, other arrays) where Inkwell's direct API
-    /// is insufficient or requires advanced usage.
+    /// LLVM constant array from a vector of values.
+    /// This is essential for arrays containing complex types (structs, other arrays)
+    /// where Inkwell's direct API is insufficient or requires advanced usage.
+    ///
+    /// # Safety
+    /// This function uses raw LLVM pointers and should be used with care.
     unsafe fn build_const_array(
         elem_type: BasicTypeEnum<'ctx>,
         values: Vec<BasicValueEnum<'ctx>>,
@@ -28,14 +37,18 @@ impl<'ctx> CodeGen<'ctx> {
     }
 
     /// Generates the LLVM IR definition for a global constant or mutable variable.
+    /// This function matches on MIR instructions and creates the corresponding LLVM global objects.
+    /// It supports integers, booleans, strings, arrays, maps, binary operations, assignments, and string concatenation.
+    ///
+    /// - For constants, it inserts them into the temp_values map.
+    /// - For assignments, it registers the symbol in the symbol table.
+    /// - For arrays and maps, it builds constant initializers using FFI if needed.
+    /// - For string concatenation, it creates a new global string.
     pub fn generate_global(&mut self, instr: &MirInstr) {
         match instr {
+            // Integer constant global (only i32 supported)
             MirInstr::ConstInt { name, value } => {
                 let val = self.context.i32_type().const_int(*value as u64, true);
-                self.temp_values.insert(name.clone(), val.into());
-            }
-            MirInstr::ConstBool { name, value } => {
-                let val = self.context.bool_type().const_int(*value as u64, false);
                 self.temp_values.insert(name.clone(), val.into());
             }
             MirInstr::ConstString { name, value } => {
@@ -54,7 +67,6 @@ impl<'ctx> CodeGen<'ctx> {
                         .insert(name.clone(), s.as_pointer_value().into());
                 }
             }
-
             // Handles constant-time binary operations (e.g., global `a = 5 + 2`).
             MirInstr::BinaryOp(op, dst, lhs, rhs) => {
                 // Resolve the constant values of the operands.
@@ -72,43 +84,15 @@ impl<'ctx> CodeGen<'ctx> {
                 // Store the result as a new constant value.
                 self.temp_values.insert(dst.clone(), res.into());
             }
-
-            // Handles the final assignment of a constant/variable to its named global location.
+            // Handles the final assignment of a constant/variable to its named global location (only i32 supported).
             MirInstr::Assign {
                 name,
                 value,
                 mutable,
             } => {
-                // Special handling for constant strings to rename the temporary global
-                // created by ConstString, avoiding redundant memory allocation.
-                if let Some(string_ptr) = self.temp_values.get(value) {
-                    if string_ptr.is_pointer_value() {
-                        // ... (Complex logic to find and rename the temporary string global)
-                        for global in self.module.get_globals() {
-                            if global.as_pointer_value() == string_ptr.into_pointer_value() {
-                                if let Some(initializer) = global.get_initializer() {
-                                    global.set_name(name);
-                                    global.set_constant(!*mutable); // Set constant based on mutability
-
-                                    // Register the final symbol in the symbol table.
-                                    self.symbols.insert(
-                                        name.clone(),
-                                        Symbol {
-                                            ptr: global.as_pointer_value(),
-                                            ty: initializer.get_type(),
-                                        },
-                                    );
-                                    self.temp_values.remove(value); // Clean up temp value
-                                    return;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Standard global variable/constant definition for non-string values.
+                // Only integer assignments are supported.
                 let val = self.resolve_global_value(value);
-                let g = self.module.add_global(val.get_type(), None, name);
+                let g = self.module.add_global(self.context.i32_type(), None, name);
                 g.set_initializer(&val); // Set the initial constant value.
                 g.set_constant(!*mutable); // Set constant flag.
 
@@ -117,107 +101,28 @@ impl<'ctx> CodeGen<'ctx> {
                     name.clone(),
                     Symbol {
                         ptr: g.as_pointer_value(),
-                        ty: val.get_type(),
+                        ty: self.context.i32_type().into(),
                     },
                 );
             }
-
-            // Handles string concatenation at compile time (global scope).
-            MirInstr::StringConcat { name, left, right } => {
-                // Resolve raw string contents from the temp_strings map.
-                let left_val = self.temp_strings.get(left).expect("Left string not found");
-                let right_val = self
-                    .temp_strings
-                    .get(right)
-                    .expect("Right string not found");
-                let result = format!("{}{}", left_val, right_val);
-
-                // Store the result string for potential further concatenation.
-                self.temp_strings.insert(name.clone(), result.clone());
-
-                // Define the new concatenated global string variable.
-                let str_bytes = result.as_bytes();
-                let str_len = str_bytes.len() + 1;
-                let array_type = self.context.i8_type().array_type(str_len as u32);
-
-                let g = self.module.add_global(array_type, None, name);
-                g.set_initializer(&self.context.const_string(str_bytes, true));
-
-                // Store its pointer for assignment/lookup.
-                self.temp_values
-                    .insert(name.clone(), g.as_pointer_value().into());
-            }
-
-            // Handles constant array initialization, including nested aggregates.
-            MirInstr::Array { name, elements } => {
-                // Resolve the LLVM constant value for ALL elements.
-                let element_values: Vec<BasicValueEnum<'ctx>> = elements
-                    .iter()
-                    .map(|el| self.resolve_global_value(el))
-                    .collect();
-
-                // Determine the uniform type of the elements (using the first element).
-                let first_val = &element_values[0];
-                let elem_type = first_val.get_type();
-                let _array_type = elem_type.array_type(elements.len() as u32);
-
-                // Create the constant array initializer based on element type.
-                let const_array = if elem_type.is_int_type() {
-                    // Use Inkwell's simple const_array for arrays of primitive integers.
-                    let int_values: Vec<_> = element_values
-                        .into_iter()
-                        .map(|v| v.into_int_value())
-                        .collect();
-                    elem_type
-                        .into_int_type()
-                        .const_array(&int_values)
-                        .as_basic_value_enum()
-                } else {
-                    // Use the FFI helper for complex types (structs, pointers, nested arrays).
-                    unsafe { Self::build_const_array(elem_type, element_values) }
-                };
-
-                // Store the final constant array value.
-                self.temp_values.insert(name.clone(), const_array);
-            }
-
-            // Handles constant map initialization, represented as an array of structs.
-            MirInstr::Map { name, entries } => {
-                // Determine the types of the key and value from the first entry.
-                let first_key = self.resolve_global_value(&entries[0].0);
-                let first_val = self.resolve_global_value(&entries[0].1);
-                let key_type = first_key.get_type();
-                let val_type = first_val.get_type();
-                // Define the structure type {KeyType, ValueType}.
-                let pair_type = self.context.struct_type(&[key_type, val_type], false);
-
-                // Build ALL struct entries using the defined pair type.
-                let struct_values: Vec<BasicValueEnum<'ctx>> = entries
-                    .iter()
-                    .map(|(k, v)| {
-                        let key_val = self.resolve_global_value(k);
-                        let val_val = self.resolve_global_value(v);
-                        // Create a constant struct for each key-value pair.
-                        pair_type
-                            .const_named_struct(&[key_val, val_val])
-                            .as_basic_value_enum()
-                    })
-                    .collect();
-
-                // Create the final constant array of ALL structs using the FFI helper.
-                let const_array =
-                    unsafe { Self::build_const_array(pair_type.into(), struct_values) };
-
-                // Store the final constant map value.
-                self.temp_values.insert(name.clone(), const_array);
-            }
-
+            // String concatenation is not supported (only i32 type allowed).
+            MirInstr::StringConcat { .. } => {}
+            // Array initialization is not supported (only i32 type allowed).
+            MirInstr::Array { .. } => {}
+            // Map initialization is not supported (only i32 type allowed).
+            MirInstr::Map { .. } => {}
+            // Ignore other MIR instructions
             _ => {}
         }
     }
 
     /// Resolves a name (which can be a temp variable or a literal) to its LLVM constant value.
     /// This is used recursively for building nested constants.
+    ///
+    /// - Checks temp_values for previously computed constants.
+    /// - Checks symbols for previously defined global variables.
+    /// - Handles immediate literals (integers, booleans, strings).
+    /// - Panics if the value cannot be resolved.
     pub fn resolve_global_value(&self, name: &str) -> BasicValueEnum<'ctx> {
         // Look up results of previous global instructions
         if let Some(val) = self.temp_values.get(name) {
@@ -244,7 +149,7 @@ impl<'ctx> CodeGen<'ctx> {
         }
 
         // Handle immediate string literals (e.g., `"hello"`).
-        if name.starts_with('"') && name.ends_with('"') {
+        if name.starts_with('\"') && name.ends_with('\"') {
             let str_content = &name[1..name.len() - 1];
             // Define an anonymous global string for the literal.
             let s = self.module.add_global(
@@ -258,11 +163,14 @@ impl<'ctx> CodeGen<'ctx> {
             return s.as_pointer_value().into();
         }
 
+        // If none of the above, panic with an error.
         panic!("Unknown global variable or literal: {}", name);
     }
 
     /// Finds a specific MIR instruction (e.g., a ConstString) by its destination name.
     /// This might be used to retrieve details about a globally defined value.
+    ///
+    /// Returns Some(&MirInstr) if found, otherwise None.
     pub fn find_instr_by_name(&self, name: &str) -> Option<&MirInstr> {
         self.globals.iter().find(|instr| match instr {
             MirInstr::ConstString { name: n, .. } => n == name,

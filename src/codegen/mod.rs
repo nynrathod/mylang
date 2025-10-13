@@ -99,12 +99,10 @@ impl<'ctx> CodeGen<'ctx> {
             decref_fn: None,
 
             heap_strings: std::collections::HashSet::new(),
-
             heap_arrays: std::collections::HashSet::new(),
             heap_maps: std::collections::HashSet::new(),
 
             composite_strings: HashMap::new(),
-
             composite_string_ptrs: HashMap::new(),
 
             array_metadata: HashMap::new(),

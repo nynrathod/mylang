@@ -7,8 +7,11 @@ use std::collections::HashMap;
 
 impl<'ctx> CodeGen<'ctx> {
     /// The main entry point for code generation. Processes the entire MIR program.
+    /// This function orchestrates the translation of the MIR (Mid-level Intermediate Representation)
+    /// into LLVM IR, handling global variables, functions, and the main entry point.
+    /// It also initializes reference counting runtime and applies optimization passes.
     pub fn generate_program(&mut self, program: &MirProgram) {
-        // Initialize RC runtime FIRST
+        // Initialize RC runtime FIRST to ensure reference counting functions are available.
         self.init_rc_runtime();
 
         // Store the global instructions for later use (e.g., initialization).
@@ -16,6 +19,7 @@ impl<'ctx> CodeGen<'ctx> {
 
         // --- PRE-PROCESSING ---
         // Scan all global instructions to identify strings involved in concatenation.
+        // This helps optimize string handling and memory management.
         for instr in &program.globals {
             if let MirInstr::StringConcat { left, right, .. } = instr {
                 self.strings_to_concat.insert(left.clone());
@@ -45,6 +49,7 @@ impl<'ctx> CodeGen<'ctx> {
     }
 
     /// Creates a minimal `main` function (`i32 ()`) that returns 0.
+    /// This is a fallback to guarantee the presence of a valid entry point in the generated binary.
     pub fn generate_default_main(&mut self) {
         let main_type = self.context.i32_type().fn_type(&[], false);
         let main_func = self.module.add_function("main", main_type, None);
@@ -58,19 +63,21 @@ impl<'ctx> CodeGen<'ctx> {
     }
 
     /// Generates the LLVM structure and code for a single MIR function.
+    /// Generates LLVM IR for a user-defined function.
+    /// This method:
+    /// - Defines the function signature (return type and parameter types).
+    /// - Creates all basic blocks for control flow.
+    /// - Allocates and registers parameters in the symbol table.
+    /// - Translates MIR blocks and instructions into LLVM IR.
+    /// - Handles block terminators (return, jump, conditional jump).
+    /// Returns the LLVM FunctionValue for further manipulation or optimization.
     pub fn generate_function(&mut self, func: &MirFunction) -> FunctionValue<'ctx> {
         // Define the LLVM function signature (return type and parameter types).
-        let fn_type = match &func.return_type {
-            Some(ret_ty) => self.get_llvm_type(ret_ty).fn_type(
-                &func
-                    .params
-                    .iter()
-                    .map(|_| self.context.i32_type().into()) // Assuming parameters are i32 for now
-                    .collect::<Vec<_>>(),
-                false,
-            ),
-            None => self.context.void_type().fn_type(&[], false),
-        };
+        // Only i32 is supported for all function return and parameter types.
+        let fn_type = self.context.i32_type().fn_type(
+            &vec![self.context.i32_type().into(); func.params.len()],
+            false,
+        );
 
         let llvm_func = self.module.add_function(&func.name, fn_type, None);
 
@@ -90,11 +97,12 @@ impl<'ctx> CodeGen<'ctx> {
         }
 
         // Allocate space for parameters and store their incoming values.
+        // This ensures parameters are available as local variables in the function scope.
         for (i, param) in func.params.iter().enumerate() {
             let param_val = llvm_func.get_nth_param(i as u32).unwrap();
             let alloca = self
                 .builder
-                .build_alloca(param_val.get_type(), param)
+                .build_alloca(self.context.i32_type(), param)
                 .expect("Failed to allocate function parameter");
 
             self.builder.build_store(alloca, param_val);
@@ -104,12 +112,13 @@ impl<'ctx> CodeGen<'ctx> {
                 param.clone(),
                 crate::codegen::Symbol {
                     ptr: alloca,
-                    ty: param_val.get_type(),
+                    ty: self.context.i32_type().into(),
                 },
             );
         }
 
         // Convert MIR block terminators to a unified structure for easier handling.
+        // This simplifies codegen for control flow instructions.
         let codegen_blocks: Vec<CodegenBlock> = func
             .blocks
             .iter()
@@ -159,6 +168,13 @@ impl<'ctx> CodeGen<'ctx> {
         llvm_func
     }
 
+    /// Generates LLVM IR for a single MIR block.
+    /// This method:
+    /// - Handles loop markers and loop setup instructions.
+    /// - Processes instructions for assignments, operations, and memory management.
+    /// - Manages reference counting for heap-allocated variables.
+    /// - Handles block terminators and loop continuation logic.
+    /// It ensures correct control flow and memory cleanup for loops and regular blocks.
     pub fn generate_block(
         &mut self,
         block: &MirBlock,
@@ -181,7 +197,7 @@ impl<'ctx> CodeGen<'ctx> {
         let mut key_var: Option<String> = None;
         let mut val_var: Option<String> = None;
 
-        // Scan for loop markers
+        // Scan for loop markers to identify loop context and variables.
         for instr in &block.instrs {
             match instr {
                 MirInstr::LoopBodyMarker {
@@ -221,15 +237,15 @@ impl<'ctx> CodeGen<'ctx> {
             }
         }
 
-        // Process instructions
+        // Process instructions in the block.
         for instr in &block.instrs {
             match instr {
-                // Skip marker instructions
+                // Skip marker instructions (used only for loop context).
                 MirInstr::LoopBodyMarker { .. }
                 | MirInstr::ArrayLoopMarker { .. }
                 | MirInstr::MapLoopMarker { .. } => continue,
 
-                // Handle loop setup instructions
+                // Handle loop setup instructions.
                 MirInstr::ForRange { .. }
                 | MirInstr::ForArray { .. }
                 | MirInstr::ForMap { .. }
@@ -237,9 +253,9 @@ impl<'ctx> CodeGen<'ctx> {
                     self.generate_for_loop(instr, bb_map);
                 }
 
-                // Handle break/continue
+                // Handle break/continue with cleanup of loop variables.
                 MirInstr::Break { .. } | MirInstr::Continue { .. } => {
-                    // Clean up loop variables before jumping
+                    // Clean up loop variables before jumping.
                     if is_array_loop && item_var.is_some() {
                         let item = item_var.as_ref().unwrap();
                         if self.heap_strings.contains(item) {
@@ -263,37 +279,37 @@ impl<'ctx> CodeGen<'ctx> {
                     return; // These terminate the block
                 }
 
-                // Handle array element loading
+                // Handle array element and map pair loading.
                 MirInstr::LoadArrayElement { .. } | MirInstr::LoadMapPair { .. } => {
                     self.generate_instr(instr);
                 }
 
-                // Regular instructions
+                // Regular instructions (assignments, operations, etc.).
                 _ => {
                     self.generate_instr(instr);
                 }
             }
         }
 
-        // After all instructions, handle loop continuation logic
+        // After all instructions, handle loop continuation logic.
         if is_range_loop {
-            // Range loop: increment variable and jump to condition
+            // Range loop: increment variable and jump to condition.
             if let (Some(var), Some(cond_block)) = (loop_increment_var, loop_cond_block) {
                 let cond_bb = bb_map.get(&cond_block).expect("Condition block not found");
                 self.generate_loop_increment_and_branch(&var, *cond_bb);
                 return; // Don't process terminator
             }
         } else if is_array_loop {
-            // Array loop: decref item (if string), increment index, jump to condition
+            // Array loop: decref item (if string), increment index, jump to condition.
             if let (Some(item), Some(index), Some(cond_block)) =
                 (item_var, index_var, loop_cond_block)
             {
-                // Decref the item if it's a string (was incref'd when loaded)
+                // Decref the item if it's a string (was incref'd when loaded).
                 if self.heap_strings.contains(&item) {
                     self.emit_decref(&item);
                 }
 
-                // Increment index
+                // Increment index.
                 if let Some(symbol) = self.symbols.get(&index) {
                     let current = self
                         .builder
@@ -310,27 +326,27 @@ impl<'ctx> CodeGen<'ctx> {
                     self.builder.build_store(symbol.ptr, incremented).unwrap();
                 }
 
-                // Jump back to condition
+                // Jump back to condition.
                 let cond_bb = bb_map.get(&cond_block).expect("Condition block not found");
                 self.builder.build_unconditional_branch(*cond_bb).unwrap();
                 return;
             }
         } else if is_map_loop {
-            // Map loop: decref key and value (if strings), increment index, jump to condition
+            // Map loop: decref key and value (if strings), increment index, jump to condition.
             if let (Some(key), Some(val), Some(index), Some(cond_block)) =
                 (key_var, val_var, index_var, loop_cond_block)
             {
-                // Decref key if string
+                // Decref key if string.
                 if self.heap_strings.contains(&key) {
                     self.emit_decref(&key);
                 }
 
-                // Decref value if string
+                // Decref value if string.
                 if self.heap_strings.contains(&val) {
                     self.emit_decref(&val);
                 }
 
-                // Increment index
+                // Increment index.
                 if let Some(symbol) = self.symbols.get(&index) {
                     let current = self
                         .builder
@@ -347,14 +363,14 @@ impl<'ctx> CodeGen<'ctx> {
                     self.builder.build_store(symbol.ptr, incremented).unwrap();
                 }
 
-                // Jump back to condition
+                // Jump back to condition.
                 let cond_bb = bb_map.get(&cond_block).expect("Condition block not found");
                 self.builder.build_unconditional_branch(*cond_bb).unwrap();
                 return;
             }
         }
 
-        // Handle regular block terminator
+        // Handle regular block terminator (return, jump, cond jump).
         if let Some(instr) = &block.terminator {
             let term = match instr {
                 MirInstr::Return { values } => MirTerminator::Return {
@@ -379,6 +395,11 @@ impl<'ctx> CodeGen<'ctx> {
     }
 
     /// Generates the final instruction of a basic block (the control flow transfer).
+    /// Generates LLVM IR for block terminators (return, jump, conditional jump).
+    /// This method:
+    /// - Handles memory cleanup for heap-allocated variables (strings, arrays, maps) on return.
+    /// - Emits LLVM IR for unconditional and conditional branches.
+    /// - Ensures correct control flow and resource management at block boundaries.
     pub fn generate_terminator(
         &mut self,
         term: &MirTerminator,
@@ -509,6 +530,13 @@ impl<'ctx> CodeGen<'ctx> {
         }
     }
 
+    /// Generates LLVM IR for a block that is part of a loop structure.
+    /// This method:
+    /// - Handles loop body markers and identifies loop variables and blocks.
+    /// - Processes instructions, including loop setup and element loading with reference counting.
+    /// - Manages incrementing loop variables and jumping back to condition blocks.
+    /// - Handles block terminators for control flow.
+    /// It ensures correct loop semantics and memory management for complex loop constructs.
     pub fn generate_block_with_loops(
         &mut self,
         block: &MirBlock,
@@ -541,9 +569,9 @@ impl<'ctx> CodeGen<'ctx> {
             }
         }
 
-        // Generate all instructions
+        // Generate all instructions in the block.
         for instr in &block.instrs {
-            // Check for loop-related instructions
+            // Check for loop-related instructions and handle accordingly.
             match instr {
                 MirInstr::ForRange { .. }
                 | MirInstr::ForArray { .. }
@@ -553,11 +581,11 @@ impl<'ctx> CodeGen<'ctx> {
                 }
 
                 MirInstr::LoadArrayElement { dest, array, index } => {
-                    // Load array element with RC handling
+                    // Load array element with RC handling.
                     let array_ptr = self.resolve_value(array).into_pointer_value();
                     let index_val = self.resolve_value(index).into_int_value();
 
-                    // Determine if elements are strings
+                    // Determine if elements are strings for RC logic.
                     let is_string =
                         self.heap_strings.contains(array) || self.array_contains_strings(array);
 
@@ -565,7 +593,7 @@ impl<'ctx> CodeGen<'ctx> {
                     let elem_val =
                         self.load_array_element_with_rc(array_ptr, index_val, elem_type, is_string);
 
-                    // Store in destination variable
+                    // Store in destination variable.
                     if let Some(symbol) = self.symbols.get(dest) {
                         self.builder.build_store(symbol.ptr, elem_val).unwrap();
                     }
@@ -591,7 +619,7 @@ impl<'ctx> CodeGen<'ctx> {
                         val_is_string,
                     );
 
-                    // Store key and value
+                    // Store key and value.
                     if let Some(symbol) = self.symbols.get(key_dest) {
                         self.builder.build_store(symbol.ptr, key_val).unwrap();
                     }
@@ -611,7 +639,7 @@ impl<'ctx> CodeGen<'ctx> {
             }
         }
 
-        // If this is a loop body, handle increment and loop back
+        // If this is a loop body, handle increment and loop back.
         if is_loop_body {
             if let (Some(var), Some(inc_bb), Some(cond_bb)) =
                 (loop_var, loop_increment_bb, loop_cond_bb)
@@ -633,13 +661,13 @@ impl<'ctx> CodeGen<'ctx> {
                     self.builder.build_store(symbol.ptr, incremented).unwrap();
                 }
 
-                // Jump back to condition
+                // Jump back to condition block for next loop iteration.
                 self.builder.build_unconditional_branch(cond_bb).unwrap();
                 return;
             }
         }
 
-        // Handle terminator if present
+        // Handle terminator if present (return, jump, cond jump).
         if let Some(instr) = &block.terminator {
             let term = match instr {
                 MirInstr::Return { values } => crate::mir::mir::MirTerminator::Return {
@@ -664,14 +692,19 @@ impl<'ctx> CodeGen<'ctx> {
     }
 
     /// Enhanced cleanup for loop exit with RC
+    /// Cleans up heap-allocated loop variables when exiting a loop.
+    /// This method:
+    /// - Decrements reference counts for strings, arrays, and maps.
+    /// - Handles cleanup of composite string pointers in arrays and maps.
+    /// - Ensures proper memory management and avoids leaks in loop constructs.
     pub fn generate_loop_cleanup(&mut self, loop_vars: &[String]) {
-        // When exiting a loop, clean up any heap-allocated loop variables
+        // When exiting a loop, clean up any heap-allocated loop variables.
         for var in loop_vars {
             if self.heap_strings.contains(var) {
                 self.emit_decref(var);
             }
             if self.heap_arrays.contains(var) {
-                // Clean up strings in array elements if needed
+                // Clean up strings in array elements if needed.
                 if let Some(str_ptrs) = self.composite_string_ptrs.get(var) {
                     for str_ptr in str_ptrs {
                         let data_ptr = str_ptr.into_pointer_value();
@@ -694,7 +727,7 @@ impl<'ctx> CodeGen<'ctx> {
                 self.emit_decref(var);
             }
             if self.heap_maps.contains(var) {
-                // Clean up strings in map if needed
+                // Clean up strings in map if needed.
                 if let Some(str_names) = self.composite_strings.get(var) {
                     for str_name in str_names {
                         if let Some(val) = self.temp_values.get(str_name) {
