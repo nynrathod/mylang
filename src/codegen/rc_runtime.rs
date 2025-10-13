@@ -35,24 +35,24 @@ impl<'ctx> CodeGen<'ctx> {
         // Get the RC header pointer from the function parameter
         let rc_ptr = function.get_nth_param(0).unwrap().into_pointer_value();
 
-        // Cast the RC header pointer to i64* (reference count is stored as i64)
-        let i64_ptr_type = self.context.i64_type().ptr_type(AddressSpace::default());
+        // Cast the RC header pointer to i32* (reference count is stored as i32)
+        let i32_ptr_type = self.context.i32_type().ptr_type(AddressSpace::default());
         let rc_ptr_typed = self
             .builder
-            .build_pointer_cast(rc_ptr, i64_ptr_type, "rc_ptr")
+            .build_pointer_cast(rc_ptr, i32_ptr_type, "rc_ptr")
             .unwrap();
 
         // Load the current reference count
         let rc = self
             .builder
-            .build_load(self.context.i64_type(), rc_ptr_typed, "rc")
+            .build_load(self.context.i32_type(), rc_ptr_typed, "rc")
             .unwrap()
             .into_int_value();
 
         // Increment the reference count by 1
         let new_rc = self
             .builder
-            .build_int_add(rc, self.context.i64_type().const_int(1, false), "new_rc")
+            .build_int_add(rc, self.context.i32_type().const_int(1, false), "new_rc")
             .unwrap();
 
         // Store the new reference count back to memory
@@ -84,24 +84,24 @@ impl<'ctx> CodeGen<'ctx> {
         // Get the RC header pointer from the function parameter
         let rc_ptr = function.get_nth_param(0).unwrap().into_pointer_value();
 
-        // Cast the RC header pointer to i64* (reference count is stored as i64)
-        let i64_ptr_type = self.context.i64_type().ptr_type(AddressSpace::default());
+        // Cast the RC header pointer to i32* (reference count is stored as i32)
+        let i32_ptr_type = self.context.i32_type().ptr_type(AddressSpace::default());
         let rc_ptr_typed = self
             .builder
-            .build_pointer_cast(rc_ptr, i64_ptr_type, "rc_ptr")
+            .build_pointer_cast(rc_ptr, i32_ptr_type, "rc_ptr")
             .unwrap();
 
         // Load the current reference count
         let rc = self
             .builder
-            .build_load(self.context.i64_type(), rc_ptr_typed, "rc")
+            .build_load(self.context.i32_type(), rc_ptr_typed, "rc")
             .unwrap()
             .into_int_value();
 
         // Decrement the reference count by 1
         let new_rc = self
             .builder
-            .build_int_sub(rc, self.context.i64_type().const_int(1, false), "new_rc")
+            .build_int_sub(rc, self.context.i32_type().const_int(1, false), "new_rc")
             .unwrap();
 
         // Store the new reference count back to memory
@@ -113,7 +113,7 @@ impl<'ctx> CodeGen<'ctx> {
             .build_int_compare(
                 inkwell::IntPredicate::EQ,
                 new_rc,
-                self.context.i64_type().const_int(0, false),
+                self.context.i32_type().const_int(0, false),
                 "should_free",
             )
             .unwrap();
@@ -164,10 +164,10 @@ impl<'ctx> CodeGen<'ctx> {
             return func;
         }
 
-        // Declare the function: i8*(i64)
-        let i64_type = self.context.i64_type();
+        // Declare the function: i8*(i32)
+        let i32_type = self.context.i32_type();
         let i8_ptr = self.context.i8_type().ptr_type(AddressSpace::default());
-        let fn_type = i8_ptr.fn_type(&[i64_type.into()], false);
+        let fn_type = i8_ptr.fn_type(&[i32_type.into()], false);
 
         self.module.add_function("malloc", fn_type, None)
     }
@@ -177,25 +177,25 @@ impl<'ctx> CodeGen<'ctx> {
     /// Returns the LLVM FunctionValue for memcpy.
     pub fn get_or_declare_memcpy(&self) -> FunctionValue<'ctx> {
         // Check if the function is already declared
-        if let Some(func) = self.module.get_function("llvm.memcpy.p0.p0.i64") {
+        if let Some(func) = self.module.get_function("llvm.memcpy.p0.p0.i32") {
             return func;
         }
-        // Declare the function: void(i8*, i8*, i64, i1)
+        // Declare the function: void(i8*, i8*, i32, i1)
         let i8_ptr = self.context.i8_type().ptr_type(AddressSpace::default());
-        let i64_type = self.context.i64_type();
+        let i32_type = self.context.i32_type();
         let i1_type = self.context.bool_type();
 
         let fn_type = self.context.void_type().fn_type(
             &[
                 i8_ptr.into(),
                 i8_ptr.into(),
-                i64_type.into(),
+                i32_type.into(),
                 i1_type.into(),
             ],
             false,
         );
         self.module
-            .add_function("llvm.memcpy.p0.p0.i64", fn_type, None)
+            .add_function("llvm.memcpy.p0.p0.i32", fn_type, None)
     }
 
     /// Emits code to increment the reference count for a variable.
@@ -215,7 +215,7 @@ impl<'ctx> CodeGen<'ctx> {
                 self.builder.build_in_bounds_gep(
                     self.context.i8_type(),
                     data_ptr,
-                    &[self.context.i64_type().const_int((-8_i64) as u64, true)],
+                    &[self.context.i32_type().const_int((-8_i32) as u64, true)],
                     "rc_header",
                 )
             }
@@ -246,7 +246,7 @@ impl<'ctx> CodeGen<'ctx> {
                 self.builder.build_in_bounds_gep(
                     self.context.i8_type(),
                     data_ptr,
-                    &[self.context.i64_type().const_int((-8_i64) as u64, true)],
+                    &[self.context.i32_type().const_int((-8_i32) as u64, true)],
                     "rc_header",
                 )
             }

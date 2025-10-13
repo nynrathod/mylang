@@ -418,7 +418,7 @@ impl<'ctx> CodeGen<'ctx> {
                             self.builder.build_in_bounds_gep(
                                 self.context.i8_type(),
                                 data_ptr,
-                                &[self.context.i64_type().const_int((-8_i64) as u64, true)],
+                                &[self.context.i32_type().const_int((-8_i32) as u64, true)],
                                 "rc_header",
                             )
                         }
@@ -444,8 +444,8 @@ impl<'ctx> CodeGen<'ctx> {
                                             data_ptr,
                                             &[self
                                                 .context
-                                                .i64_type()
-                                                .const_int((-8_i64) as u64, true)],
+                                                .i32_type()
+                                                .const_int((-8_i32) as u64, true)],
                                             "rc_header",
                                         )
                                     }
@@ -712,7 +712,7 @@ impl<'ctx> CodeGen<'ctx> {
                             self.builder.build_in_bounds_gep(
                                 self.context.i8_type(),
                                 data_ptr,
-                                &[self.context.i64_type().const_int((-8_i64) as u64, true)],
+                                &[self.context.i32_type().const_int((-8_i32) as u64, true)],
                                 "rc_header",
                             )
                         }
@@ -737,7 +737,7 @@ impl<'ctx> CodeGen<'ctx> {
                                     self.builder.build_in_bounds_gep(
                                         self.context.i8_type(),
                                         data_ptr,
-                                        &[self.context.i64_type().const_int((-8_i64) as u64, true)],
+                                        &[self.context.i32_type().const_int((-8_i32) as u64, true)],
                                         "rc_header",
                                     )
                                 }

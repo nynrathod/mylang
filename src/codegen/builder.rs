@@ -22,7 +22,7 @@ impl<'ctx> CodeGen<'ctx> {
             }
 
             MirInstr::ConstBool { name, value } => {
-                let val = self.context.bool_type().const_int(*value as u64, false);
+                let val = self.context.i32_type().const_int(*value as u64, false);
                 self.temp_values.insert(name.clone(), val.into());
                 Some(val.into())
             }
@@ -30,7 +30,7 @@ impl<'ctx> CodeGen<'ctx> {
             MirInstr::ConstString { name, value } => {
                 let malloc_fn = self.get_or_declare_malloc();
                 let total_size = 8 + value.len() + 1;
-                let size_val = self.context.i64_type().const_int(total_size as u64, false);
+                let size_val = self.context.i32_type().const_int(total_size as u64, false);
 
                 let heap_ptr = self
                     .builder
@@ -41,16 +41,16 @@ impl<'ctx> CodeGen<'ctx> {
                     .unwrap()
                     .into_pointer_value();
 
-                let i64_ptr = self
+                let i32_ptr = self
                     .builder
                     .build_pointer_cast(
                         heap_ptr,
-                        self.context.i64_type().ptr_type(AddressSpace::default()),
+                        self.context.ptr_type(AddressSpace::default()),
                         "rc_ptr",
                     )
                     .unwrap();
                 self.builder
-                    .build_store(i64_ptr, self.context.i64_type().const_int(1, false))
+                    .build_store(i32_ptr, self.context.i32_type().const_int(1, false))
                     .unwrap();
 
                 let data_ptr = unsafe {
@@ -58,7 +58,7 @@ impl<'ctx> CodeGen<'ctx> {
                         .build_gep(
                             self.context.i8_type(),
                             heap_ptr,
-                            &[self.context.i64_type().const_int(8, false)],
+                            &[self.context.i32_type().const_int(8, false)],
                             "data_ptr",
                         )
                         .unwrap()
@@ -72,7 +72,7 @@ impl<'ctx> CodeGen<'ctx> {
                 let memcpy = self.get_or_declare_memcpy();
                 let len = self
                     .context
-                    .i64_type()
+                    .i32_type()
                     .const_int((value.len() + 1) as u64, false);
                 self.builder
                     .build_call(
@@ -135,7 +135,7 @@ impl<'ctx> CodeGen<'ctx> {
                     .builder
                     .build_pointer_cast(
                         array_ptr,
-                        array_type.ptr_type(AddressSpace::default()),
+                        self.context.ptr_type(AddressSpace::default()),
                         "array_ptr_typed",
                     )
                     .unwrap();
@@ -164,7 +164,7 @@ impl<'ctx> CodeGen<'ctx> {
                         self.builder.build_in_bounds_gep(
                             self.context.i8_type(),
                             str_ptr,
-                            &[self.context.i64_type().const_int((-8_i64) as u64, true)],
+                            &[self.context.i32_type().const_int((-8_i32) as u64, true)],
                             "rc_header",
                         )
                     }
@@ -226,7 +226,7 @@ impl<'ctx> CodeGen<'ctx> {
                     .builder
                     .build_pointer_cast(
                         map_ptr,
-                        map_array_type.ptr_type(AddressSpace::default()),
+                        self.context.ptr_type(AddressSpace::default()),
                         "map_ptr_typed",
                     )
                     .unwrap();
@@ -263,7 +263,7 @@ impl<'ctx> CodeGen<'ctx> {
                         self.builder.build_in_bounds_gep(
                             self.context.i8_type(),
                             str_ptr,
-                            &[self.context.i64_type().const_int((-8_i64) as u64, true)],
+                            &[self.context.i32_type().const_int((-8_i32) as u64, true)],
                             "rc_header",
                         )
                     }
@@ -282,7 +282,7 @@ impl<'ctx> CodeGen<'ctx> {
                         self.builder.build_in_bounds_gep(
                             self.context.i8_type(),
                             str_ptr,
-                            &[self.context.i64_type().const_int((-8_i64) as u64, true)],
+                            &[self.context.i32_type().const_int((-8_i32) as u64, true)],
                             "rc_header",
                         )
                     }
@@ -413,7 +413,7 @@ impl<'ctx> CodeGen<'ctx> {
                                     self.builder.build_in_bounds_gep(
                                         self.context.i8_type(),
                                         data_ptr,
-                                        &[self.context.i64_type().const_int((-8_i64) as u64, true)],
+                                        &[self.context.i32_type().const_int((-8_i32) as u64, true)],
                                         "rc_header",
                                     )
                                 }
@@ -595,7 +595,7 @@ impl<'ctx> CodeGen<'ctx> {
         // HEAP ALLOCATE with RC header
         let malloc_fn = self.get_or_declare_malloc();
         let array_size = array_type.size_of().unwrap();
-        let total_size = self.context.i64_type().const_int(8, false);
+        let total_size = self.context.i32_type().const_int(8, false);
         let total_size = self
             .builder
             .build_int_add(total_size, array_size, "total_size")
@@ -611,16 +611,16 @@ impl<'ctx> CodeGen<'ctx> {
             .into_pointer_value();
 
         // Store RC = 1
-        let i64_ptr = self
+        let i32_ptr = self
             .builder
             .build_pointer_cast(
                 heap_ptr,
-                self.context.i64_type().ptr_type(AddressSpace::default()),
+                self.context.i32_type().ptr_type(AddressSpace::default()),
                 "rc_ptr",
             )
             .unwrap();
         self.builder
-            .build_store(i64_ptr, self.context.i64_type().const_int(1, false))
+            .build_store(i32_ptr, self.context.i32_type().const_int(1, false))
             .unwrap();
 
         // Get data pointer
@@ -629,7 +629,7 @@ impl<'ctx> CodeGen<'ctx> {
                 .build_gep(
                     self.context.i8_type(),
                     heap_ptr,
-                    &[self.context.i64_type().const_int(8, false)],
+                    &[self.context.i32_type().const_int(8, false)],
                     "data_ptr",
                 )
                 .unwrap()
@@ -733,7 +733,7 @@ impl<'ctx> CodeGen<'ctx> {
         // HEAP ALLOCATE with RC header
         let malloc_fn = self.get_or_declare_malloc();
         let map_size = map_type.size_of().unwrap();
-        let total_size = self.context.i64_type().const_int(8, false);
+        let total_size = self.context.i32_type().const_int(8, false);
         let total_size = self
             .builder
             .build_int_add(total_size, map_size, "total_size")
@@ -749,16 +749,16 @@ impl<'ctx> CodeGen<'ctx> {
             .into_pointer_value();
 
         // Store RC = 1
-        let i64_ptr = self
+        let i32_ptr = self
             .builder
             .build_pointer_cast(
                 heap_ptr,
-                self.context.i64_type().ptr_type(AddressSpace::default()),
+                self.context.i32_type().ptr_type(AddressSpace::default()),
                 "rc_ptr",
             )
             .unwrap();
         self.builder
-            .build_store(i64_ptr, self.context.i64_type().const_int(1, false))
+            .build_store(i32_ptr, self.context.i32_type().const_int(1, false))
             .unwrap();
 
         // Get data pointer
@@ -767,7 +767,7 @@ impl<'ctx> CodeGen<'ctx> {
                 .build_gep(
                     self.context.i8_type(),
                     heap_ptr,
-                    &[self.context.i64_type().const_int(8, false)],
+                    &[self.context.i32_type().const_int(8, false)],
                     "data_ptr",
                 )
                 .unwrap()
@@ -1217,7 +1217,7 @@ impl<'ctx> CodeGen<'ctx> {
                                 self.builder.build_in_bounds_gep(
                                     self.context.i8_type(),
                                     data_ptr,
-                                    &[self.context.i64_type().const_int((-8_i64) as u64, true)],
+                                    &[self.context.i32_type().const_int((-8_i32) as u64, true)],
                                     "rc_header",
                                 )
                             }
@@ -1245,8 +1245,8 @@ impl<'ctx> CodeGen<'ctx> {
                                             data_ptr,
                                             &[self
                                                 .context
-                                                .i64_type()
-                                                .const_int((-8_i64) as u64, true)],
+                                                .i32_type()
+                                                .const_int((-8_i32) as u64, true)],
                                             "rc_header",
                                         )
                                     }
@@ -1400,7 +1400,7 @@ impl<'ctx> CodeGen<'ctx> {
                 self.builder.build_in_bounds_gep(
                     self.context.i8_type(),
                     str_ptr,
-                    &[self.context.i64_type().const_int((-8_i64) as u64, true)],
+                    &[self.context.i32_type().const_int((-8_i32) as u64, true)],
                     "rc_header",
                 )
             }
@@ -1470,7 +1470,7 @@ impl<'ctx> CodeGen<'ctx> {
                 self.builder.build_in_bounds_gep(
                     self.context.i8_type(),
                     str_ptr,
-                    &[self.context.i64_type().const_int((-8_i64) as u64, true)],
+                    &[self.context.i32_type().const_int((-8_i32) as u64, true)],
                     "rc_header",
                 )
             }
@@ -1487,7 +1487,7 @@ impl<'ctx> CodeGen<'ctx> {
                 self.builder.build_in_bounds_gep(
                     self.context.i8_type(),
                     str_ptr,
-                    &[self.context.i64_type().const_int((-8_i64) as u64, true)],
+                    &[self.context.i32_type().const_int((-8_i32) as u64, true)],
                     "rc_header",
                 )
             }
