@@ -94,6 +94,7 @@ pub struct CodeGen<'ctx> {
     pub map_metadata: HashMap<String, MapMetadata>,
     pub loop_stack: Vec<LoopContext>,
     pub arrayget_sources: HashMap<String, String>, // Maps ArrayGet result names to their source array names
+    pub current_function_params: Vec<(String, Option<String>)>, // Track current function parameters (name, type) for RC on return
 }
 
 impl<'ctx> CodeGen<'ctx> {
@@ -128,6 +129,7 @@ impl<'ctx> CodeGen<'ctx> {
             map_metadata: HashMap::new(),
             loop_stack: Vec::new(),
             arrayget_sources: HashMap::new(),
+            current_function_params: Vec::new(),
         }
     }
 

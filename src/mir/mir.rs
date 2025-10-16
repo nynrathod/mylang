@@ -16,6 +16,7 @@ pub struct MirProgram {
 pub struct MirFunction {
     pub name: String, // Function identifier
     pub params: Vec<String>,
+    pub param_types: Vec<Option<String>>, // Parameter types (e.g., "Int", "Str", "Array", "Map")
     pub return_type: Option<String>,
     pub blocks: Vec<MirBlock>,
 }

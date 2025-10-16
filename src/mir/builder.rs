@@ -229,6 +229,7 @@ impl MirBuilder {
                     let mut temp_func = MirFunction {
                         name: if_func_name.clone(),
                         params: vec![],
+                        param_types: vec![],
                         return_type: None,
                         blocks: vec![],
                     };
@@ -258,6 +259,7 @@ impl MirBuilder {
                     let mut temp_func = MirFunction {
                         name: loop_func_name.clone(),
                         params: vec![],
+                        param_types: vec![],
                         return_type: None,
                         blocks: vec![],
                     };

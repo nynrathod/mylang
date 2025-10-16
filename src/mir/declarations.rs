@@ -110,11 +110,12 @@ pub fn build_let_decl(builder: &mut MirBuilder, node: &AstNode) -> Vec<MirInstr>
 
 /// Build MIR instructions for a function declaration.
 /// - Sets up a new MIR function with parameters and return type.
-/// - Tracks reference-counted variables in function scope.
+/// - Tracks reference-counted variables in function scope (but NOT parameters).
 /// - Maps function arguments to temporaries and assigns them to parameter names.
 /// - Builds MIR for each statement in the function body.
 /// - Ensures entry block jumps to loops if they exist (not returns immediately).
 /// - Adds DecRef cleanup to the final reachable block only (no duplicates).
+/// - Parameters are NOT tracked for RC cleanup since caller owns them.
 /// - Adds an implicit return if none is present and the function has no return type.
 pub fn build_function_decl(builder: &mut MirBuilder, node: &AstNode) {
     if let AstNode::FunctionDecl {
@@ -128,6 +129,10 @@ pub fn build_function_decl(builder: &mut MirBuilder, node: &AstNode) {
         let func = MirFunction {
             name: name.clone(),
             params: params.iter().map(|(n, _)| n.clone()).collect(),
+            param_types: params
+                .iter()
+                .map(|(_, t)| t.as_ref().map(|ty| format!("{:?}", ty)))
+                .collect(),
             return_type: return_type.as_ref().map(|t| format!("{:?}", t)),
             blocks: vec![],
         };
@@ -147,17 +152,26 @@ pub fn build_function_decl(builder: &mut MirBuilder, node: &AstNode) {
         // Enter function scope for reference counting.
         builder.enter_scope();
 
-        // Add arguments: map parameter names to temporaries and assign.
-        for (param_name, _) in params {
-            let tmp = builder.next_tmp();
-            block.instrs.push(MirInstr::Arg { name: tmp.clone() });
+        // Track parameter names and types to check if they need RC
+        let mut param_rc_types: Vec<(String, bool)> = Vec::new();
 
-            // Assign argument to parameter name (parameters are immutable).
-            block.instrs.push(MirInstr::Assign {
-                name: param_name.clone(),
-                value: tmp,
-                mutable: false,
-            });
+        // Parameters are handled directly by codegen (allocated and stored from function args)
+        // No need for Arg instructions or intermediate temps
+        // Just track which parameters need RC for potential future use
+        for (param_name, param_type) in params {
+            // Check if parameter is RC type (String, Array, Map)
+            let is_rc = match param_type {
+                Some(TypeNode::String) => true,
+                Some(TypeNode::Array(_)) => true,
+                Some(TypeNode::Map(_, _)) => true,
+                _ => false,
+            };
+
+            param_rc_types.push((param_name.clone(), is_rc));
+
+            // DO NOT track parameters as RC variables for cleanup
+            // Parameters are owned by the caller, not by this function
+            // The function borrows them, and caller handles cleanup
         }
 
         // Build MIR for each statement in the function body.

@@ -1,5 +1,6 @@
 use crate::codegen::CodeGen;
 use crate::mir::mir::{CodegenBlock, MirBlock, MirFunction, MirInstr, MirProgram, MirTerminator};
+use inkwell::types::BasicMetadataTypeEnum;
 use inkwell::types::StructType;
 use inkwell::types::{BasicType, BasicTypeEnum};
 use inkwell::values::FunctionValue;
@@ -84,13 +85,59 @@ impl<'ctx> CodeGen<'ctx> {
         self.composite_string_ptrs.clear();
         self.composite_strings.clear();
 
-        // Define the LLVM function signature (return type and parameter types).
-        // Only i32 is supported for all function return and parameter types.
-        let fn_type = self.context.i32_type().fn_type(
-            &vec![self.context.i32_type().into(); func.params.len()],
-            false,
-        );
+        // Track function parameters for RC handling on return
+        self.current_function_params.clear();
+        for (i, param_name) in func.params.iter().enumerate() {
+            let param_type = func.param_types.get(i).and_then(|t| t.clone());
+            self.current_function_params
+                .push((param_name.clone(), param_type));
+        }
 
+        // Build parameter types based on function signature
+        let param_types: Vec<BasicMetadataTypeEnum> = func
+            .param_types
+            .iter()
+            .map(|type_opt| {
+                if let Some(type_str) = type_opt {
+                    // Map MIR type strings to LLVM types
+                    if type_str.contains("String") || type_str.contains("Str") {
+                        self.context.ptr_type(AddressSpace::default()).into()
+                    } else if type_str.contains("Array") {
+                        self.context.ptr_type(AddressSpace::default()).into()
+                    } else if type_str.contains("Map") {
+                        self.context.ptr_type(AddressSpace::default()).into()
+                    } else {
+                        self.context.i32_type().into()
+                    }
+                } else {
+                    self.context.i32_type().into()
+                }
+            })
+            .collect();
+
+        // Determine return type and create function signature
+        let fn_type = if let Some(ref ret_type_str) = func.return_type {
+            // Map MIR type strings to LLVM types
+            if ret_type_str.contains("Void") {
+                self.context.void_type().fn_type(&param_types, false)
+            } else if ret_type_str.contains("String") || ret_type_str.contains("Str") {
+                self.context
+                    .ptr_type(AddressSpace::default())
+                    .fn_type(&param_types, false)
+            } else if ret_type_str.contains("Array") {
+                self.context
+                    .ptr_type(AddressSpace::default())
+                    .fn_type(&param_types, false)
+            } else if ret_type_str.contains("Map") {
+                self.context
+                    .ptr_type(AddressSpace::default())
+                    .fn_type(&param_types, false)
+            } else {
+                self.context.i32_type().fn_type(&param_types, false)
+            }
+        } else {
+            self.context.void_type().fn_type(&param_types, false)
+        };
         let llvm_func = self.module.add_function(&func.name, fn_type, None);
 
         // Create all necessary basic blocks within the function (e.g., entry, if.then, loop.body).
@@ -112,9 +159,26 @@ impl<'ctx> CodeGen<'ctx> {
         // This ensures parameters are available as local variables in the function scope.
         for (i, param) in func.params.iter().enumerate() {
             let param_val = llvm_func.get_nth_param(i as u32).unwrap();
+
+            // Get the correct type for this parameter
+            let param_type = if let Some(Some(ref type_str)) = func.param_types.get(i) {
+                // Map MIR type strings to LLVM types
+                if type_str.contains("String") || type_str.contains("Str") {
+                    self.context.ptr_type(AddressSpace::default()).into()
+                } else if type_str.contains("Array") {
+                    self.context.ptr_type(AddressSpace::default()).into()
+                } else if type_str.contains("Map") {
+                    self.context.ptr_type(AddressSpace::default()).into()
+                } else {
+                    self.context.i32_type().into()
+                }
+            } else {
+                self.context.i32_type().into()
+            };
+
             let alloca = self
                 .builder
-                .build_alloca(self.context.i32_type(), param)
+                .build_alloca(param_type, param)
                 .expect("Failed to allocate function parameter");
 
             self.builder.build_store(alloca, param_val);
@@ -124,7 +188,7 @@ impl<'ctx> CodeGen<'ctx> {
                 param.clone(),
                 crate::codegen::Symbol {
                     ptr: alloca,
-                    ty: self.context.i32_type().into(),
+                    ty: param_type,
                 },
             );
         }
@@ -725,10 +789,49 @@ impl<'ctx> CodeGen<'ctx> {
                 }
 
                 if values.is_empty() {
-                    let zero = self.context.i32_type().const_int(0, false);
-                    self.builder.build_return(Some(&zero)).unwrap();
+                    // Void return - no value
+                    self.builder.build_return(None).unwrap();
                 } else {
-                    let val = self.resolve_value(&values[0]);
+                    let return_value_name = &values[0];
+
+                    // Check if we're returning a function parameter that needs RC increment
+                    let needs_incref =
+                        self.current_function_params
+                            .iter()
+                            .any(|(param_name, param_type)| {
+                                if param_name == return_value_name {
+                                    // Check if this parameter is RC-typed
+                                    if let Some(type_str) = param_type {
+                                        return type_str.contains("String")
+                                            || type_str.contains("Str")
+                                            || type_str.contains("Array")
+                                            || type_str.contains("Map");
+                                    }
+                                }
+                                false
+                            });
+
+                    let val = self.resolve_value(return_value_name);
+
+                    // If returning an RC-typed parameter, incref it (caller expects ownership)
+                    if needs_incref && val.is_pointer_value() {
+                        let ptr = val.into_pointer_value();
+                        let rc_header = unsafe {
+                            self.builder.build_in_bounds_gep(
+                                self.context.i8_type(),
+                                ptr,
+                                &[self.context.i32_type().const_int((-8_i32) as u64, true)],
+                                "return_rc_header",
+                            )
+                        }
+                        .unwrap();
+
+                        let incref_fn = self.incref_fn.unwrap();
+                        self.builder
+                            .build_call(incref_fn, &[rc_header.into()], "")
+                            .unwrap();
+                    }
+
                     self.builder.build_return(Some(&val)).unwrap();
                 }
             }

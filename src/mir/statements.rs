@@ -169,13 +169,26 @@ pub fn build_statement(builder: &mut MirBuilder, stmt: &AstNode, block: &mut Mir
                 let mut else_mir_block = MirBlock {
                     label: else_label,
                     instrs: vec![],
-                    terminator: Some(MirInstr::Jump {
-                        target: end_label.clone(),
-                    }),
+                    terminator: None, // Don't preset terminator - let statements set it
                 };
-                build_statement(builder, else_stmt, &mut else_mir_block);
+
+                // Handle else branch - it might be a Block or a single statement
+                match else_stmt.as_ref() {
+                    AstNode::Block(statements) => {
+                        // If it's a block, iterate through all statements
+                        for stmt in statements {
+                            build_statement(builder, stmt, &mut else_mir_block);
+                        }
+                    }
+                    _ => {
+                        // Single statement (like another if)
+                        build_statement(builder, else_stmt, &mut else_mir_block);
+                    }
+                }
+
                 builder.exit_scope(&mut else_mir_block);
 
+                // Only add jump to end if block doesn't already have a terminator (like Return)
                 if else_mir_block.terminator.is_none() {
                     else_mir_block.terminator = Some(MirInstr::Jump {
                         target: end_label.clone(),

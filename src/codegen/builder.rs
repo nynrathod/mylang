@@ -1473,6 +1473,42 @@ impl<'ctx> CodeGen<'ctx> {
                 Some(field_val)
             }
 
+            MirInstr::Print { values } => {
+                // For now, implement a simple print that outputs integers
+                // In a full implementation, you'd handle different types
+
+                // Declare printf if not already declared
+                let printf_fn = self.get_or_declare_printf();
+
+                for value in values {
+                    let val = self.resolve_value(value);
+
+                    // Create format string based on value type
+                    let format_str = if val.is_int_value() {
+                        "%d\n"
+                    } else if val.is_pointer_value() {
+                        "%s\n"
+                    } else {
+                        "%d\n" // default to int format
+                    };
+
+                    let format_global = self
+                        .builder
+                        .build_global_string_ptr(format_str, "print_fmt")
+                        .unwrap();
+
+                    self.builder
+                        .build_call(
+                            printf_fn,
+                            &[format_global.as_pointer_value().into(), val.into()],
+                            "print_call",
+                        )
+                        .unwrap();
+                }
+
+                None
+            }
+
             _ => None,
         }
     }
@@ -1530,6 +1566,17 @@ impl<'ctx> CodeGen<'ctx> {
             "Str" => self.context.ptr_type(AddressSpace::default()).into(),
             _ => self.context.i32_type().into(),
         }
+    }
+
+    /// Get or declare printf function for print statements
+    fn get_or_declare_printf(&self) -> FunctionValue<'ctx> {
+        if let Some(func) = self.module.get_function("printf") {
+            return func;
+        }
+
+        let i8_ptr_type = self.context.ptr_type(AddressSpace::default());
+        let printf_type = self.context.i32_type().fn_type(&[i8_ptr_type.into()], true);
+        self.module.add_function("printf", printf_type, None)
     }
 
     pub fn generate_array_with_metadata(
