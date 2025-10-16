@@ -21,7 +21,7 @@ impl<'ctx> CodeGen<'ctx> {
     /// Returns the LLVM FunctionValue for later use.
     fn create_incref_function(&self) -> FunctionValue<'ctx> {
         // Define the function signature: void(i8*)
-        let i8_ptr = self.context.i8_type().ptr_type(AddressSpace::default());
+        let i8_ptr = self.context.ptr_type(AddressSpace::default());
         let void_type = self.context.void_type();
         let fn_type = void_type.fn_type(&[i8_ptr.into()], false);
 
@@ -68,7 +68,7 @@ impl<'ctx> CodeGen<'ctx> {
     /// Returns the LLVM FunctionValue for later use.
     fn create_decref_function(&self) -> FunctionValue<'ctx> {
         // Define the function signature: void(i8*)
-        let i8_ptr = self.context.i8_type().ptr_type(AddressSpace::default());
+        let i8_ptr = self.context.ptr_type(AddressSpace::default());
         let void_type = self.context.void_type();
         let fn_type = void_type.fn_type(&[i8_ptr.into()], false);
 
@@ -148,7 +148,7 @@ impl<'ctx> CodeGen<'ctx> {
         }
 
         // Declare the function: void(i8*)
-        let i8_ptr = self.context.i8_type().ptr_type(AddressSpace::default());
+        let i8_ptr = self.context.ptr_type(AddressSpace::default());
         let void_type = self.context.void_type();
         let fn_type = void_type.fn_type(&[i8_ptr.into()], false);
 
@@ -164,10 +164,10 @@ impl<'ctx> CodeGen<'ctx> {
             return func;
         }
 
-        // Declare the function: i8*(i32)
-        let i32_type = self.context.i32_type();
-        let i8_ptr = self.context.i8_type().ptr_type(AddressSpace::default());
-        let fn_type = i8_ptr.fn_type(&[i32_type.into()], false);
+        // Declare the function: i8*(i64)
+        let i64_type = self.context.i64_type();
+        let i8_ptr = self.context.ptr_type(AddressSpace::default());
+        let fn_type = i8_ptr.fn_type(&[i64_type.into()], false);
 
         self.module.add_function("malloc", fn_type, None)
     }
@@ -177,25 +177,25 @@ impl<'ctx> CodeGen<'ctx> {
     /// Returns the LLVM FunctionValue for memcpy.
     pub fn get_or_declare_memcpy(&self) -> FunctionValue<'ctx> {
         // Check if the function is already declared
-        if let Some(func) = self.module.get_function("llvm.memcpy.p0.p0.i32") {
+        if let Some(func) = self.module.get_function("llvm.memcpy.p0.p0.i64") {
             return func;
         }
-        // Declare the function: void(i8*, i8*, i32, i1)
-        let i8_ptr = self.context.i8_type().ptr_type(AddressSpace::default());
-        let i32_type = self.context.i32_type();
+        // Declare the function: void(i8*, i8*, i64, i1)
+        let i8_ptr = self.context.ptr_type(AddressSpace::default());
+        let i64_type = self.context.i64_type();
         let i1_type = self.context.bool_type();
 
         let fn_type = self.context.void_type().fn_type(
             &[
                 i8_ptr.into(),
                 i8_ptr.into(),
-                i32_type.into(),
+                i64_type.into(),
                 i1_type.into(),
             ],
             false,
         );
         self.module
-            .add_function("llvm.memcpy.p0.p0.i32", fn_type, None)
+            .add_function("llvm.memcpy.p0.p0.i64", fn_type, None)
     }
 
     /// Emits code to increment the reference count for a variable.
@@ -203,12 +203,19 @@ impl<'ctx> CodeGen<'ctx> {
     /// and calls the incref function.
     pub fn emit_incref(&self, var_name: &str) {
         if let Some(symbol) = self.symbols.get(var_name) {
-            // Load the data pointer from the symbol
-            let data_ptr = self
+            // Load the value from the symbol
+            let loaded_value = self
                 .builder
                 .build_load(symbol.ty, symbol.ptr, "loaded")
-                .unwrap()
-                .into_pointer_value();
+                .unwrap();
+
+            // Only do RC for pointer types (strings, arrays, maps)
+            // Skip integers, booleans, and other non-pointer types
+            if !loaded_value.is_pointer_value() {
+                return;
+            }
+
+            let data_ptr = loaded_value.into_pointer_value();
 
             // Compute the RC header pointer by subtracting 8 bytes
             let rc_header = unsafe {
@@ -234,12 +241,19 @@ impl<'ctx> CodeGen<'ctx> {
     /// and calls the decref function.
     pub fn emit_decref(&self, var_name: &str) {
         if let Some(symbol) = self.symbols.get(var_name) {
-            // Load the data pointer from the symbol
-            let data_ptr = self
+            // Load the value from the symbol
+            let loaded_value = self
                 .builder
                 .build_load(symbol.ty, symbol.ptr, "loaded")
-                .unwrap()
-                .into_pointer_value();
+                .unwrap();
+
+            // Only do RC for pointer types (strings, arrays, maps)
+            // Skip integers, booleans, and other non-pointer types
+            if !loaded_value.is_pointer_value() {
+                return;
+            }
+
+            let data_ptr = loaded_value.into_pointer_value();
 
             // Compute the RC header pointer by subtracting 8 bytes
             let rc_header = unsafe {

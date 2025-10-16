@@ -1,8 +1,9 @@
 use crate::codegen::CodeGen;
 use crate::mir::mir::{CodegenBlock, MirBlock, MirFunction, MirInstr, MirProgram, MirTerminator};
-use inkwell::types::BasicType;
 use inkwell::types::StructType;
+use inkwell::types::{BasicType, BasicTypeEnum};
 use inkwell::values::FunctionValue;
+use inkwell::AddressSpace;
 use std::collections::HashMap;
 
 impl<'ctx> CodeGen<'ctx> {
@@ -72,6 +73,17 @@ impl<'ctx> CodeGen<'ctx> {
     /// - Handles block terminators (return, jump, conditional jump).
     /// Returns the LLVM FunctionValue for further manipulation or optimization.
     pub fn generate_function(&mut self, func: &MirFunction) -> FunctionValue<'ctx> {
+        // Clear symbols table to prevent conflicts between functions
+        self.symbols.clear();
+        self.temp_values.clear();
+        self.heap_strings.clear();
+        self.heap_arrays.clear();
+        self.heap_maps.clear();
+        self.array_metadata.clear();
+        self.map_metadata.clear();
+        self.composite_string_ptrs.clear();
+        self.composite_strings.clear();
+
         // Define the LLVM function signature (return type and parameter types).
         // Only i32 is supported for all function return and parameter types.
         let fn_type = self.context.i32_type().fn_type(
@@ -115,6 +127,218 @@ impl<'ctx> CodeGen<'ctx> {
                     ty: self.context.i32_type().into(),
                 },
             );
+        }
+
+        // Pre-allocate variables that are used across multiple blocks
+        // This is necessary for proper SSA form and cross-block variable access
+        use std::collections::HashSet;
+        let mut defined_vars: HashMap<String, HashSet<String>> = HashMap::new(); // block -> vars defined
+        let mut used_vars: HashMap<String, HashSet<String>> = HashMap::new(); // block -> vars used
+
+        // Scan all blocks to find variable definitions and uses
+        for block in &func.blocks {
+            let mut block_defs = HashSet::new();
+            let mut block_uses = HashSet::new();
+
+            for instr in &block.instrs {
+                match instr {
+                    crate::mir::MirInstr::Assign { name, value, .. } => {
+                        block_defs.insert(name.clone());
+                        if !value.starts_with('%')
+                            && !value.parse::<i32>().is_ok()
+                            && value != "true"
+                            && value != "false"
+                        {
+                            block_uses.insert(value.clone());
+                        }
+                    }
+                    crate::mir::MirInstr::BinaryOp(_, _, left, right) => {
+                        if !left.starts_with('%')
+                            && !left.parse::<i32>().is_ok()
+                            && left != "true"
+                            && left != "false"
+                        {
+                            block_uses.insert(left.clone());
+                        }
+                        if !right.starts_with('%')
+                            && !right.parse::<i32>().is_ok()
+                            && right != "true"
+                            && right != "false"
+                        {
+                            block_uses.insert(right.clone());
+                        }
+                    }
+                    crate::mir::MirInstr::ArrayLen { array, .. } => {
+                        if !array.starts_with('%') {
+                            block_uses.insert(array.clone());
+                        }
+                    }
+                    crate::mir::MirInstr::ArrayGet { array, index, .. } => {
+                        if !array.starts_with('%') {
+                            block_uses.insert(array.clone());
+                        }
+                        if !index.starts_with('%') {
+                            block_uses.insert(index.clone());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            // Check terminator for variable uses
+            if let Some(term) = &block.terminator {
+                match term {
+                    crate::mir::MirInstr::CondJump { cond, .. } => {
+                        if !cond.starts_with('%')
+                            && !cond.parse::<i32>().is_ok()
+                            && cond != "true"
+                            && cond != "false"
+                        {
+                            block_uses.insert(cond.clone());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            defined_vars.insert(block.label.clone(), block_defs);
+            used_vars.insert(block.label.clone(), block_uses);
+        }
+
+        // Find variables that are defined in one block and used in another
+        let mut cross_block_vars = HashSet::new();
+        for (use_block, uses) in &used_vars {
+            for var in uses {
+                // Check if this variable is defined in a different block
+                let mut defined_elsewhere = false;
+                for (def_block, defs) in &defined_vars {
+                    if def_block != use_block && defs.contains(var) {
+                        defined_elsewhere = true;
+                        break;
+                    }
+                }
+                if defined_elsewhere {
+                    cross_block_vars.insert(var.clone());
+                }
+            }
+        }
+
+        // Determine variable types by scanning instructions that define them
+        let mut var_types: HashMap<String, BasicTypeEnum<'ctx>> = HashMap::new();
+        for block in &func.blocks {
+            for instr in &block.instrs {
+                match instr {
+                    // Arrays are always pointers
+                    crate::mir::MirInstr::Array { name, .. } => {
+                        var_types.insert(
+                            name.clone(),
+                            self.context.ptr_type(AddressSpace::default()).into(),
+                        );
+                    }
+                    // Maps are always pointers
+                    crate::mir::MirInstr::Map { name, .. } => {
+                        var_types.insert(
+                            name.clone(),
+                            self.context.ptr_type(AddressSpace::default()).into(),
+                        );
+                    }
+                    // Strings are always pointers
+                    crate::mir::MirInstr::ConstString { name, .. } => {
+                        var_types.insert(
+                            name.clone(),
+                            self.context.ptr_type(AddressSpace::default()).into(),
+                        );
+                    }
+                    // Variables with "_array" or "_map" suffix are pointers
+                    // BUT: exclude index variables (ending with __index)
+                    crate::mir::MirInstr::Assign { name, value, .. } => {
+                        // Index variables are always i32
+                        if name.ends_with("__index") || name.ends_with("_end") {
+                            var_types.insert(name.clone(), self.context.i32_type().into());
+                        } else if name.ends_with("_array")
+                            || name.ends_with("_map")
+                            || name.ends_with("item_array")
+                            || name.ends_with("_ptr")
+                        {
+                            // Only mark as pointer if it's NOT an index variable
+                            var_types.insert(
+                                name.clone(),
+                                self.context.ptr_type(AddressSpace::default()).into(),
+                            );
+                        }
+                        // If assigned from a known pointer type, it's also a pointer
+                        // BUT: not if this is an index variable
+                        else if !name.ends_with("__index") && !name.ends_with("_end") {
+                            if let Some(val_type) = var_types.get(value) {
+                                if val_type.is_pointer_type() {
+                                    var_types.insert(name.clone(), *val_type);
+                                }
+                            }
+                        }
+                    }
+                    // ArrayLen results are i32
+                    crate::mir::MirInstr::ArrayLen { name, .. } => {
+                        var_types.insert(name.clone(), self.context.i32_type().into());
+                    }
+                    // MapLen results are i32
+                    crate::mir::MirInstr::MapLen { name, .. } => {
+                        var_types.insert(name.clone(), self.context.i32_type().into());
+                    }
+                    // Integer constants are i32
+                    crate::mir::MirInstr::ConstInt { name, .. } => {
+                        var_types.insert(name.clone(), self.context.i32_type().into());
+                    }
+                    // Boolean constants are i32
+                    crate::mir::MirInstr::ConstBool { name, .. } => {
+                        var_types.insert(name.clone(), self.context.i32_type().into());
+                    }
+                    // Binary operations produce i32
+                    crate::mir::MirInstr::BinaryOp(_, name, ..) => {
+                        var_types.insert(name.clone(), self.context.i32_type().into());
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // Allocate stack space for cross-block variables with correct types
+        for var in &cross_block_vars {
+            if !self.symbols.contains_key(var) && !var.starts_with('%') {
+                // Determine the correct type for this variable
+                let var_type = var_types.get(var).copied().unwrap_or_else(|| {
+                    // Index and end variables are always i32
+                    if var.ends_with("__index")
+                        || var.ends_with("_end")
+                        || var == "i"
+                        || var == "counter"
+                    {
+                        self.context.i32_type().into()
+                    }
+                    // Default heuristic: if name suggests array/map/string, use ptr, otherwise i32
+                    else if var.ends_with("_array")
+                        || var.ends_with("_map")
+                        || var.ends_with("item_array")
+                        || var.ends_with("_ptr")
+                    {
+                        self.context.ptr_type(AddressSpace::default()).into()
+                    } else {
+                        self.context.i32_type().into()
+                    }
+                });
+
+                let alloca = self
+                    .builder
+                    .build_alloca(var_type, var)
+                    .expect("Failed to allocate cross-block variable");
+
+                self.symbols.insert(
+                    var.clone(),
+                    crate::codegen::Symbol {
+                        ptr: alloca,
+                        ty: var_type,
+                    },
+                );
+            }
         }
 
         // Convert MIR block terminators to a unified structure for easier handling.

@@ -11,6 +11,7 @@ use std::collections::HashMap;
 pub mod builder;
 pub mod functions;
 pub mod globals;
+pub mod loops;
 pub mod rc_runtime;
 
 /// Represents a variable allocated on the stack or in global memory.
@@ -39,12 +40,29 @@ pub struct MapMetadata {
     pub value_is_string: bool,
 }
 
+/// Loop type enumeration
+#[derive(Debug, Clone, PartialEq)]
+pub enum LoopType {
+    Range,
+    Array {
+        item_var: String,
+        array_var: String,
+    },
+    Map {
+        key_var: String,
+        value_var: String,
+        map_var: String,
+    },
+    Infinite,
+}
+
 /// Loop context for tracking nested loops
 #[derive(Debug, Clone)]
 pub struct LoopContext {
     pub exit_block: String,
     pub continue_block: String,
     pub loop_vars: Vec<String>,
+    pub loop_type: Option<LoopType>,
 }
 
 /// The main context structure for generating LLVM Intermediate Representation (IR).
@@ -75,6 +93,7 @@ pub struct CodeGen<'ctx> {
     pub array_metadata: HashMap<String, ArrayMetadata>,
     pub map_metadata: HashMap<String, MapMetadata>,
     pub loop_stack: Vec<LoopContext>,
+    pub arrayget_sources: HashMap<String, String>, // Maps ArrayGet result names to their source array names
 }
 
 impl<'ctx> CodeGen<'ctx> {
@@ -108,6 +127,7 @@ impl<'ctx> CodeGen<'ctx> {
             array_metadata: HashMap::new(),
             map_metadata: HashMap::new(),
             loop_stack: Vec::new(),
+            arrayget_sources: HashMap::new(),
         }
     }
 
@@ -118,10 +138,21 @@ impl<'ctx> CodeGen<'ctx> {
 
     /// Enter a new loop context
     pub fn enter_loop(&mut self, exit_block: String, continue_block: String) {
+        self.enter_loop_with_type(exit_block, continue_block, None);
+    }
+
+    /// Enter a new loop context with type information
+    pub fn enter_loop_with_type(
+        &mut self,
+        exit_block: String,
+        continue_block: String,
+        loop_type: Option<LoopType>,
+    ) {
         self.loop_stack.push(LoopContext {
             exit_block,
             continue_block,
             loop_vars: Vec::new(),
+            loop_type,
         });
     }
 

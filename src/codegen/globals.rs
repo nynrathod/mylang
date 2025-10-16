@@ -46,11 +46,18 @@ impl<'ctx> CodeGen<'ctx> {
     /// - For string concatenation, it creates a new global string.
     pub fn generate_global(&mut self, instr: &MirInstr) {
         match instr {
-            // Integer constant global (only i32 supported)
+            // Integer constant global (only i32 for integers)
             MirInstr::ConstInt { name, value } => {
                 let val = self.context.i32_type().const_int(*value as u64, true);
                 self.temp_values.insert(name.clone(), val.into());
             }
+            // Boolean constant global
+            MirInstr::ConstBool { name, value } => {
+                // Use i32 instead of i1 for consistency with rest of codegen
+                let val = self.context.i32_type().const_int(*value as u64, false);
+                self.temp_values.insert(name.clone(), val.into());
+            }
+            // String constant global
             MirInstr::ConstString { name, value } => {
                 // For global strings, just create static constant (no RC)
                 // RC will be handled in functions, not globals
@@ -84,15 +91,42 @@ impl<'ctx> CodeGen<'ctx> {
                 // Store the result as a new constant value.
                 self.temp_values.insert(dst.clone(), res.into());
             }
-            // Handles the final assignment of a constant/variable to its named global location (only i32 supported).
+            // Handles the final assignment of a constant/variable to its named global location.
             MirInstr::Assign {
                 name,
                 value,
                 mutable,
             } => {
-                // Only integer assignments are supported.
+                // Special handling for constant strings to rename the temporary global
+                // created by ConstString, avoiding redundant memory allocation.
+                if let Some(string_ptr) = self.temp_values.get(value) {
+                    if string_ptr.is_pointer_value() {
+                        // Find and rename the temporary string global, set mutability, and register symbol.
+                        for global in self.module.get_globals() {
+                            if global.as_pointer_value() == string_ptr.into_pointer_value() {
+                                if let Some(initializer) = global.get_initializer() {
+                                    global.set_name(name);
+                                    global.set_constant(!*mutable); // Set constant based on mutability
+
+                                    // Register the final symbol in the symbol table.
+                                    self.symbols.insert(
+                                        name.clone(),
+                                        Symbol {
+                                            ptr: global.as_pointer_value(),
+                                            ty: initializer.get_type(),
+                                        },
+                                    );
+                                    self.temp_values.remove(value); // Clean up temp value
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Standard global variable/constant definition for non-string values.
                 let val = self.resolve_global_value(value);
-                let g = self.module.add_global(self.context.i32_type(), None, name);
+                let g = self.module.add_global(val.get_type(), None, name);
                 g.set_initializer(&val); // Set the initial constant value.
                 g.set_constant(!*mutable); // Set constant flag.
 
@@ -101,16 +135,97 @@ impl<'ctx> CodeGen<'ctx> {
                     name.clone(),
                     Symbol {
                         ptr: g.as_pointer_value(),
-                        ty: self.context.i32_type().into(),
+                        ty: val.get_type(),
                     },
                 );
             }
-            // String concatenation is not supported (only i32 type allowed).
-            MirInstr::StringConcat { .. } => {}
-            // Array initialization is not supported (only i32 type allowed).
-            MirInstr::Array { .. } => {}
-            // Map initialization is not supported (only i32 type allowed).
-            MirInstr::Map { .. } => {}
+            // Handles string concatenation at compile time (global scope).
+            MirInstr::StringConcat { name, left, right } => {
+                // Resolve raw string contents from the temp_strings map.
+                let left_val = self.temp_strings.get(left).expect("Left string not found");
+                let right_val = self
+                    .temp_strings
+                    .get(right)
+                    .expect("Right string not found");
+                let result = format!("{}{}", left_val, right_val);
+
+                // Store the result string for potential further concatenation.
+                self.temp_strings.insert(name.clone(), result.clone());
+
+                // Define the new concatenated global string variable.
+                let str_bytes = result.as_bytes();
+                let str_len = str_bytes.len() + 1;
+                let array_type = self.context.i8_type().array_type(str_len as u32);
+
+                let g = self.module.add_global(array_type, None, name);
+                g.set_initializer(&self.context.const_string(str_bytes, true));
+
+                // Store its pointer for assignment/lookup.
+                self.temp_values
+                    .insert(name.clone(), g.as_pointer_value().into());
+            }
+            // Handles constant array initialization, including nested aggregates.
+            MirInstr::Array { name, elements } => {
+                // Resolve the LLVM constant value for ALL elements.
+                let element_values: Vec<BasicValueEnum<'ctx>> = elements
+                    .iter()
+                    .map(|el| self.resolve_global_value(el))
+                    .collect();
+
+                // Determine the uniform type of the elements (using the first element).
+                let first_val = &element_values[0];
+                let elem_type = first_val.get_type();
+                let _array_type = elem_type.array_type(elements.len() as u32);
+
+                // Create the constant array initializer based on element type.
+                let const_array = if elem_type.is_int_type() {
+                    // Use Inkwell's simple const_array for arrays of primitive integers.
+                    let int_values: Vec<_> = element_values
+                        .into_iter()
+                        .map(|v| v.into_int_value())
+                        .collect();
+                    elem_type
+                        .into_int_type()
+                        .const_array(&int_values)
+                        .as_basic_value_enum()
+                } else {
+                    // Use the FFI helper for complex types (structs, pointers, nested arrays).
+                    unsafe { Self::build_const_array(elem_type, element_values) }
+                };
+
+                // Store the final constant array value.
+                self.temp_values.insert(name.clone(), const_array);
+            }
+            // Handles constant map initialization, represented as an array of structs.
+            MirInstr::Map { name, entries } => {
+                // Determine the types of the key and value from the first entry.
+                let first_key = self.resolve_global_value(&entries[0].0);
+                let first_val = self.resolve_global_value(&entries[0].1);
+                let key_type = first_key.get_type();
+                let val_type = first_val.get_type();
+                // Define the structure type {KeyType, ValueType}.
+                let pair_type = self.context.struct_type(&[key_type, val_type], false);
+
+                // Build ALL struct entries using the defined pair type.
+                let struct_values: Vec<BasicValueEnum<'ctx>> = entries
+                    .iter()
+                    .map(|(k, v)| {
+                        let key_val = self.resolve_global_value(k);
+                        let val_val = self.resolve_global_value(v);
+                        // Create a constant struct for each key-value pair.
+                        pair_type
+                            .const_named_struct(&[key_val, val_val])
+                            .as_basic_value_enum()
+                    })
+                    .collect();
+
+                // Create the final constant array of ALL structs using the FFI helper.
+                let const_array =
+                    unsafe { Self::build_const_array(pair_type.into(), struct_values) };
+
+                // Store the final constant map value.
+                self.temp_values.insert(name.clone(), const_array);
+            }
             // Ignore other MIR instructions
             _ => {}
         }
@@ -137,15 +252,15 @@ impl<'ctx> CodeGen<'ctx> {
             }
         }
 
-        // Handle immediate literal values (integers, booleans).
+        // Handle immediate literals (integers using i32, booleans).
         if let Ok(val) = name.parse::<i32>() {
             return self.context.i32_type().const_int(val as u64, true).into();
         }
         if name == "true" {
-            return self.context.bool_type().const_int(1, false).into();
+            return self.context.i32_type().const_int(1, false).into();
         }
         if name == "false" {
-            return self.context.bool_type().const_int(0, false).into();
+            return self.context.i32_type().const_int(0, false).into();
         }
 
         // Handle immediate string literals (e.g., `"hello"`).
