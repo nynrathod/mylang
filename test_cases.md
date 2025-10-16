@@ -1,6 +1,6 @@
 
-fn ValidCaseFunc() {
-    // // ====== Variable - Valid
+fn VarDecl() {
+    // ====== Variable - Valid
     let mut aa = 1 < 2;
     let mut asd = aa;
     let a: Int = 42 + 5;
@@ -55,6 +55,137 @@ fn ValidCaseFunc() {
 
     let arrCopy1 = arrS1;
     let arrCopy2 = arrCopy1;
+}
+
+fn ForLoops() {
+    // ====== Range For Loops ======
+
+    // Basic range loop (exclusive)
+    for i in 0..5 {
+        // Loop variable i goes from 0 to 4
+    }
+
+    // Range with variable end
+    let n = 10;
+    for i in 0..n {
+        // Loop from 0 to n-1
+    }
+
+    // Inclusive range loop
+    for i in 0..=5 {
+        // Loop variable i goes from 0 to 5 (inclusive)
+    }
+
+    // ====== Array For Loops ======
+
+    // Integer array iteration
+    let arr: [Int] = [1, 2, 3, 4, 5];
+    for item in arr {
+        // item is each integer from the array
+        // No RC needed for integers
+    }
+
+    // String array iteration (RC needed)
+    let strarr: [Str] = ["hello", "world", "test"];
+    for stritem in strarr {
+        // str_item gets RC increment when loaded
+        // Automatic RC decrement at end of iteration
+    }
+
+    // ====== Map For Loops ======
+
+    // String to Int map
+    let map1: {Str: Int} = {"apple": 1, "banana": 2, "cherry": 3};
+    for (key, value) in map1 {
+        // key gets RC increment (string)
+        // value is int (no RC needed)
+        // Automatic cleanup at end of iteration
+    }
+
+    // String to String map (both need RC)
+    let map2: {Str: Str} = {"hello": "world", "foo": "bar"};
+    for (k, v) in map2 {
+        // Both k and v get RC increment
+        // Both cleaned up at end of iteration
+    }
+
+    // ====== Nested Loops with RC ======
+
+    let outerarr: [Str] = ["a", "b"];
+    for outeritem in outerarr {
+        // outer_item gets RC
+        let innerarr: [Str] = ["x", "y"];
+        for inneritem in innerarr {
+            // inner_item gets RC
+            // Proper nested cleanup
+        }
+        // inner_item cleaned up here
+        // inner_arr cleaned up here
+    }
+    // outer_item cleaned up here
+    // outer_arr cleaned up here
+
+    // ====== Break and Continue with RC ======
+
+    let testarr: [Str] = ["one", "two", "three", "four"];
+    for item in testarr {
+        // item gets RC increment
+
+        // Simulate condition for break
+        let shouldbreak = false;
+        if shouldbreak {
+            // RC cleanup happens before break
+            break;
+        }
+
+        // Simulate condition for continue
+        let shouldcontinue = false;
+        if shouldcontinue {
+            // RC cleanup happens before continue
+            continue;
+        }
+
+        // Normal iteration continues
+    }
+    // Final cleanup happens here
+
+    // ====== Infinite Loop ======
+
+    let counter = 0;
+    for {
+        // Infinite loop
+        counter = counter + 1;
+
+        // Simulate break condition
+        if counter > 5 {
+            break;
+        }
+    }
+
+    // ====== Complex RC Scenarios ======
+
+    // Array of arrays (nested RC)
+    let nested: [[Str]] = [["a", "b"], ["c", "d"]];
+    for subarray in nested {
+        // sub_array gets RC
+        for strelement in subarray {
+            // str_element gets RC
+            // Proper nested RC management
+        }
+    }
+
+    // Variable assignment in loops
+    let result: Str = "";
+    let sources: [Str] = ["hello", "world"];
+    for source in sources {
+        // source gets RC
+        result = source; // result gets RC, old value decremented
+    }
+    // Final cleanup of all variables
+}
+
+// fn ValidCaseFunc() {
+
 
 
     // // ====== Conditional - Valid
@@ -242,7 +373,7 @@ fn ValidCaseFunc() {
     // enum FAemptyEnum {}
 
 
-}
+// }
 
 
 
@@ -251,7 +382,7 @@ fn ValidCaseFunc() {
 
 
 
-fn InValidCaseFunc() {
+// fn InValidCaseFunc() {
 
     // // ====== VARIABLE - INVALID
     // let FAa: Str = 5;
@@ -410,4 +541,4 @@ fn InValidCaseFunc() {
     //     FAguest,
     // }
 
-}
+// }
