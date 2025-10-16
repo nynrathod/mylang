@@ -3,9 +3,11 @@ use crate::mir::MirInstr;
 use inkwell::types::BasicType;
 use inkwell::types::BasicTypeEnum;
 use inkwell::types::StructType;
+use inkwell::values::BasicMetadataValueEnum;
 use inkwell::values::BasicValue;
 use inkwell::values::BasicValueEnum;
 use inkwell::values::FunctionValue;
+use inkwell::values::PointerValue;
 use inkwell::AddressSpace;
 use inkwell::IntPredicate;
 
@@ -610,12 +612,16 @@ impl<'ctx> CodeGen<'ctx> {
 
                     if value_is_heap_str {
                         self.heap_strings.insert(name.clone());
+                        // Remove temp from tracking (ownership transferred to symbol)
+                        self.heap_strings.remove(value);
                         // Only incref when copying from an existing variable (not from a temp)
                         if self.symbols.contains_key(value) {
                             self.emit_incref(name);
                         }
                     } else if value_is_heap_array {
                         self.heap_arrays.insert(name.clone());
+                        // Remove temp from tracking (ownership transferred to symbol)
+                        self.heap_arrays.remove(value);
                         // Only incref when copying from an existing variable (not from a temp)
                         if self.symbols.contains_key(value) {
                             self.emit_incref(name);
@@ -770,11 +776,15 @@ impl<'ctx> CodeGen<'ctx> {
 
                     if value_is_heap_str {
                         self.heap_strings.insert(name.clone());
+                        // Remove temp from tracking (ownership transferred to symbol)
+                        self.heap_strings.remove(value);
                         if self.symbols.contains_key(value) {
                             self.emit_incref(name);
                         }
                     } else if value_is_heap_array {
                         self.heap_arrays.insert(name.clone());
+                        // Remove temp from tracking (ownership transferred to symbol)
+                        self.heap_arrays.remove(value);
                         if self.symbols.contains_key(value) {
                             self.emit_incref(name);
                         }
@@ -871,6 +881,8 @@ impl<'ctx> CodeGen<'ctx> {
                         }
                     } else if value_is_heap_map {
                         self.heap_maps.insert(name.clone());
+                        // Remove temp from tracking (ownership transferred to symbol)
+                        self.heap_maps.remove(value);
                         if self.symbols.contains_key(value) {
                             self.emit_incref(name);
                         }
@@ -1473,44 +1485,173 @@ impl<'ctx> CodeGen<'ctx> {
                 Some(field_val)
             }
 
-            MirInstr::Print { values } => {
-                // For now, implement a simple print that outputs integers
-                // In a full implementation, you'd handle different types
+            MirInstr::Call { dest, func, args } => {
+                // Get the function being called
+                let callee = self.module.get_function(func).expect(&format!(
+                    "Function '{}' not found. Make sure it's declared before calling.",
+                    func
+                ));
 
-                // Declare printf if not already declared
+                // Resolve all argument values
+                let arg_values: Vec<BasicMetadataValueEnum> = args
+                    .iter()
+                    .map(|arg| self.resolve_value(arg).into())
+                    .collect();
+
+                // Call the function
+                let call_result = self
+                    .builder
+                    .build_call(callee, &arg_values, "call_result")
+                    .unwrap();
+
+                // Handle return value if function returns something
+                if let Some(result) = call_result.try_as_basic_value().left() {
+                    // Store result in destination variable(s)
+                    if !dest.is_empty() {
+                        let dest_name = &dest[0];
+                        self.temp_values.insert(dest_name.clone(), result);
+
+                        // Check return type to determine if RC tracking is needed
+                        // Use the stored function return type information
+                        if let Some(return_type_str) = self.function_return_types.get(func) {
+                            if result.is_pointer_value() {
+                                // Determine which RC collection based on actual return type
+                                if return_type_str.contains("Str")
+                                    || return_type_str.contains("String")
+                                {
+                                    self.heap_strings.insert(dest_name.clone());
+                                } else if return_type_str.contains("Array") {
+                                    self.heap_arrays.insert(dest_name.clone());
+                                } else if return_type_str.contains("Map") {
+                                    self.heap_maps.insert(dest_name.clone());
+                                }
+                                // Note: The returned value already has RC=1 from the called function
+                                // We don't need to incref it here - the caller now owns it
+                            }
+                        }
+
+                        return Some(result);
+                    }
+                }
+
+                None
+            }
+
+            MirInstr::Print { values } => {
                 let printf_fn = self.get_or_declare_printf();
 
-                for value in values {
-                    let val = self.resolve_value(value);
+                // Print each value with a space separator, newline at the end
+                for (idx, value) in values.iter().enumerate() {
+                    // Check if it's an array or map BEFORE resolving the value
+                    let is_array =
+                        self.array_metadata.contains_key(value) || self.heap_arrays.contains(value);
+                    let is_map =
+                        self.map_metadata.contains_key(value) || self.heap_maps.contains(value);
 
-                    // Create format string based on value type
-                    let format_str = if val.is_int_value() {
-                        "%d\n"
-                    } else if val.is_pointer_value() {
-                        "%s\n"
+                    if is_array {
+                        // Print array as [elem1, elem2, ...]
+                        self.print_array(value);
+                        if idx < values.len() - 1 {
+                            let space_fmt = self
+                                .builder
+                                .build_global_string_ptr(" ", "space_fmt")
+                                .unwrap();
+                            self.builder
+                                .build_call(
+                                    printf_fn,
+                                    &[space_fmt.as_pointer_value().into()],
+                                    "space_call",
+                                )
+                                .unwrap();
+                        }
+                    } else if is_map {
+                        // Print map as {key1: val1, key2: val2}
+                        self.print_map(value);
+                        if idx < values.len() - 1 {
+                            let space_fmt = self
+                                .builder
+                                .build_global_string_ptr(" ", "space_fmt")
+                                .unwrap();
+                            self.builder
+                                .build_call(
+                                    printf_fn,
+                                    &[space_fmt.as_pointer_value().into()],
+                                    "space_call",
+                                )
+                                .unwrap();
+                        }
                     } else {
-                        "%d\n" // default to int format
-                    };
+                        // Resolve value for primitives and strings
+                        let val = self.resolve_value(value);
 
-                    let format_global = self
-                        .builder
-                        .build_global_string_ptr(format_str, "print_fmt")
-                        .unwrap();
+                        // Determine the type of the value and print accordingly
+                        if val.is_int_value() {
+                            // Check if this is a boolean (stored as i32)
+                            let format_str = if idx < values.len() - 1 { "%d " } else { "%d" };
 
-                    self.builder
-                        .build_call(
-                            printf_fn,
-                            &[format_global.as_pointer_value().into(), val.into()],
-                            "print_call",
-                        )
-                        .unwrap();
+                            let format_global = self
+                                .builder
+                                .build_global_string_ptr(format_str, "print_fmt")
+                                .unwrap();
+
+                            self.builder
+                                .build_call(
+                                    printf_fn,
+                                    &[format_global.as_pointer_value().into(), val.into()],
+                                    "print_call",
+                                )
+                                .unwrap();
+                        } else if val.is_pointer_value() {
+                            // It's a string
+                            let format_str = if idx < values.len() - 1 { "%s " } else { "%s" };
+
+                            let format_global = self
+                                .builder
+                                .build_global_string_ptr(format_str, "print_fmt")
+                                .unwrap();
+
+                            self.builder
+                                .build_call(
+                                    printf_fn,
+                                    &[format_global.as_pointer_value().into(), val.into()],
+                                    "print_call",
+                                )
+                                .unwrap();
+                        }
+                    }
                 }
+
+                // Print newline at the end
+                let newline_fmt = self
+                    .builder
+                    .build_global_string_ptr("\n", "newline_fmt")
+                    .unwrap();
+                self.builder
+                    .build_call(
+                        printf_fn,
+                        &[newline_fmt.as_pointer_value().into()],
+                        "newline_call",
+                    )
+                    .unwrap();
 
                 None
             }
 
             _ => None,
         }
+    }
+
+    /// Resolves a variable or constant name to its pointer (for arrays/maps).
+    /// Used when we need the actual pointer, not the loaded value.
+    pub fn resolve_pointer(&self, name: &str) -> PointerValue<'ctx> {
+        if let Some(sym) = self.symbols.get(name) {
+            return sym.ptr;
+        }
+
+        panic!(
+            "Unknown variable for pointer resolution: {} - check your MIR generation",
+            name
+        );
     }
 
     /// Resolve value (unchanged)
@@ -1751,6 +1892,14 @@ impl<'ctx> CodeGen<'ctx> {
             self.builder.build_store(elem_ptr, *val).unwrap();
         }
 
+        // CRITICAL: Remove element strings from heap_strings - they're now owned by the array
+        // The array's composite_string_ptrs tracking will handle their cleanup
+        for elem_name in elements {
+            if self.heap_strings.contains(elem_name) {
+                self.heap_strings.remove(elem_name);
+            }
+        }
+
         self.temp_values.insert(name.to_string(), data_ptr.into());
         self.heap_arrays.insert(name.to_string());
 
@@ -1886,6 +2035,7 @@ impl<'ctx> CodeGen<'ctx> {
             )
             .unwrap();
 
+        // Store key-value pairs
         for (i, (k, v)) in entries.iter().enumerate() {
             let key_val = self.resolve_value(k);
             let val_val = self.resolve_value(v);
@@ -1913,6 +2063,17 @@ impl<'ctx> CodeGen<'ctx> {
                 .build_struct_gep(pair_type, pair_ptr, 1, "val_ptr")
                 .unwrap();
             self.builder.build_store(val_ptr, val_val).unwrap();
+        }
+
+        // CRITICAL: Remove key/value strings from heap_strings - they're now owned by the map
+        // The map's composite_string_ptrs tracking will handle their cleanup
+        for (k, v) in entries {
+            if self.heap_strings.contains(k) {
+                self.heap_strings.remove(k);
+            }
+            if self.heap_strings.contains(v) {
+                self.heap_strings.remove(v);
+            }
         }
 
         self.temp_values.insert(name.to_string(), data_ptr.into());
@@ -2671,5 +2832,270 @@ impl<'ctx> CodeGen<'ctx> {
         let fn_type = size_t.fn_type(&[i8_ptr.into()], false);
 
         self.module.add_function("strlen", fn_type, None)
+    }
+
+    /// Helper method to print an array
+    fn print_array(&mut self, array_name: &str) {
+        let printf_fn = self.get_or_declare_printf();
+
+        // Print opening bracket
+        let open_bracket = self
+            .builder
+            .build_global_string_ptr("[", "open_bracket")
+            .unwrap();
+        self.builder
+            .build_call(printf_fn, &[open_bracket.as_pointer_value().into()], "")
+            .unwrap();
+
+        // Get array metadata
+        let metadata = self.array_metadata.get(array_name).cloned();
+
+        if let Some(metadata) = metadata {
+            // Get pointer to the array (not the loaded value)
+            let array_ptr = if self.symbols.contains_key(array_name) {
+                self.resolve_pointer(array_name)
+            } else {
+                // For temporary arrays, resolve_value should work
+                self.resolve_value(array_name).into_pointer_value()
+            };
+            let elem_type = if metadata.element_type == "Str" {
+                self.context
+                    .ptr_type(AddressSpace::default())
+                    .as_basic_type_enum()
+            } else {
+                self.context.i32_type().as_basic_type_enum()
+            };
+
+            let array_type = elem_type.array_type(metadata.length as u32);
+            let typed_array_ptr = self
+                .builder
+                .build_pointer_cast(
+                    array_ptr,
+                    self.context.ptr_type(AddressSpace::default()),
+                    "typed_array_ptr",
+                )
+                .unwrap();
+
+            // Print each element
+            for i in 0..metadata.length {
+                let index = self.context.i32_type().const_int(i as u64, false);
+                let elem_ptr = unsafe {
+                    self.builder.build_gep(
+                        array_type,
+                        typed_array_ptr,
+                        &[self.context.i32_type().const_zero(), index],
+                        "elem_ptr",
+                    )
+                }
+                .unwrap();
+
+                let elem_val = self
+                    .builder
+                    .build_load(elem_type, elem_ptr, "elem")
+                    .unwrap();
+
+                // Print the element based on its type
+                if metadata.element_type == "Str" {
+                    let format_str = if i < metadata.length - 1 {
+                        "\"%s\", "
+                    } else {
+                        "\"%s\""
+                    };
+                    let format_global = self
+                        .builder
+                        .build_global_string_ptr(format_str, "array_elem_fmt")
+                        .unwrap();
+                    self.builder
+                        .build_call(
+                            printf_fn,
+                            &[format_global.as_pointer_value().into(), elem_val.into()],
+                            "",
+                        )
+                        .unwrap();
+                } else {
+                    let format_str = if i < metadata.length - 1 {
+                        "%d, "
+                    } else {
+                        "%d"
+                    };
+                    let format_global = self
+                        .builder
+                        .build_global_string_ptr(format_str, "array_elem_fmt")
+                        .unwrap();
+                    self.builder
+                        .build_call(
+                            printf_fn,
+                            &[format_global.as_pointer_value().into(), elem_val.into()],
+                            "",
+                        )
+                        .unwrap();
+                }
+            }
+        }
+
+        // Print closing bracket
+        let close_bracket = self
+            .builder
+            .build_global_string_ptr("]", "close_bracket")
+            .unwrap();
+        self.builder
+            .build_call(printf_fn, &[close_bracket.as_pointer_value().into()], "")
+            .unwrap();
+    }
+
+    /// Helper method to print a map
+    fn print_map(&mut self, map_name: &str) {
+        let printf_fn = self.get_or_declare_printf();
+
+        // Print opening brace
+        let open_brace = self
+            .builder
+            .build_global_string_ptr("{", "open_brace")
+            .unwrap();
+        self.builder
+            .build_call(printf_fn, &[open_brace.as_pointer_value().into()], "")
+            .unwrap();
+
+        // Get map metadata
+        let metadata = self.map_metadata.get(map_name).cloned();
+
+        if let Some(metadata) = metadata {
+            // Get pointer to the map (not the loaded value)
+            let map_ptr = if self.symbols.contains_key(map_name) {
+                self.resolve_pointer(map_name)
+            } else {
+                // For temporary maps, resolve_value should work
+                self.resolve_value(map_name).into_pointer_value()
+            };
+
+            let key_type = if metadata.key_type == "Str" {
+                self.context
+                    .ptr_type(AddressSpace::default())
+                    .as_basic_type_enum()
+            } else {
+                self.context.i32_type().as_basic_type_enum()
+            };
+
+            let val_type = if metadata.value_type == "Str" {
+                self.context
+                    .ptr_type(AddressSpace::default())
+                    .as_basic_type_enum()
+            } else {
+                self.context.i32_type().as_basic_type_enum()
+            };
+
+            let pair_type = self.context.struct_type(&[key_type, val_type], false);
+            let map_array_type = pair_type.array_type(metadata.length as u32);
+
+            let typed_map_ptr = self
+                .builder
+                .build_pointer_cast(
+                    map_ptr,
+                    self.context.ptr_type(AddressSpace::default()),
+                    "typed_map_ptr",
+                )
+                .unwrap();
+
+            // Print each key-value pair
+            for i in 0..metadata.length {
+                let index = self.context.i32_type().const_int(i as u64, false);
+                let pair_ptr = unsafe {
+                    self.builder.build_gep(
+                        map_array_type,
+                        typed_map_ptr,
+                        &[self.context.i32_type().const_zero(), index],
+                        "pair_ptr",
+                    )
+                }
+                .unwrap();
+
+                // Extract key
+                let key_ptr = self
+                    .builder
+                    .build_struct_gep(pair_type, pair_ptr, 0, "key_ptr")
+                    .unwrap();
+                let key_val = self.builder.build_load(key_type, key_ptr, "key").unwrap();
+
+                // Extract value
+                let val_ptr = self
+                    .builder
+                    .build_struct_gep(pair_type, pair_ptr, 1, "val_ptr")
+                    .unwrap();
+                let val_val = self.builder.build_load(val_type, val_ptr, "val").unwrap();
+
+                // Print key
+                if metadata.key_type == "Str" {
+                    let key_fmt = self
+                        .builder
+                        .build_global_string_ptr("\"%s\": ", "key_fmt")
+                        .unwrap();
+                    self.builder
+                        .build_call(
+                            printf_fn,
+                            &[key_fmt.as_pointer_value().into(), key_val.into()],
+                            "",
+                        )
+                        .unwrap();
+                } else {
+                    let key_fmt = self
+                        .builder
+                        .build_global_string_ptr("%d: ", "key_fmt")
+                        .unwrap();
+                    self.builder
+                        .build_call(
+                            printf_fn,
+                            &[key_fmt.as_pointer_value().into(), key_val.into()],
+                            "",
+                        )
+                        .unwrap();
+                }
+
+                // Print value
+                if metadata.value_type == "Str" {
+                    let val_fmt = if i < metadata.length - 1 {
+                        "\"%s\", "
+                    } else {
+                        "\"%s\""
+                    };
+                    let val_fmt_global = self
+                        .builder
+                        .build_global_string_ptr(val_fmt, "val_fmt")
+                        .unwrap();
+                    self.builder
+                        .build_call(
+                            printf_fn,
+                            &[val_fmt_global.as_pointer_value().into(), val_val.into()],
+                            "",
+                        )
+                        .unwrap();
+                } else {
+                    let val_fmt = if i < metadata.length - 1 {
+                        "%d, "
+                    } else {
+                        "%d"
+                    };
+                    let val_fmt_global = self
+                        .builder
+                        .build_global_string_ptr(val_fmt, "val_fmt")
+                        .unwrap();
+                    self.builder
+                        .build_call(
+                            printf_fn,
+                            &[val_fmt_global.as_pointer_value().into(), val_val.into()],
+                            "",
+                        )
+                        .unwrap();
+                }
+            }
+        }
+
+        // Print closing brace
+        let close_brace = self
+            .builder
+            .build_global_string_ptr("}", "close_brace")
+            .unwrap();
+        self.builder
+            .build_call(printf_fn, &[close_brace.as_pointer_value().into()], "")
+            .unwrap();
     }
 }

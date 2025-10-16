@@ -96,15 +96,32 @@ impl<'a> Parser<'a> {
                 TokenType::Print => self.parse_print(),
 
                 // Handles statements that start with an identifier.
-                // These are NOT declarations (like 'let')
-                // Only allow assignment statements for identifiers, not underscores.
+                // Could be assignment (x = 5;) or expression statement (abc();)
                 TokenType::Identifier => {
-                    // Assignment statements: e.g., x = 5;
-                    match self.parse_assignment() {
-                        Ok(assign) => Ok(assign),
-                        Err(_) => Err(ParseError::UnexpectedToken(
-                            "Only single-variable assignment is allowed without 'let'".into(),
-                        )),
+                    // Try to parse as expression first (handles function calls)
+                    let expr = self.parse_expression()?;
+
+                    // Check if it's followed by '=' (assignment)
+                    if self.peek_is(TokenType::Eq) {
+                        self.advance(); // consume '='
+                        let value = self.parse_expression()?;
+                        self.expect(TokenType::Semi)?;
+
+                        // Extract identifier from expr for assignment
+                        if let AstNode::Identifier(name) = expr {
+                            return Ok(AstNode::Assignment {
+                                pattern: crate::parser::ast::Pattern::Identifier(name),
+                                value: Box::new(value),
+                            });
+                        } else {
+                            return Err(ParseError::UnexpectedToken(
+                                "Only single-variable assignment is allowed without 'let'".into(),
+                            ));
+                        }
+                    } else {
+                        // It's an expression statement (like function call)
+                        self.expect(TokenType::Semi)?;
+                        return Ok(expr);
                     }
                 }
 

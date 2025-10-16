@@ -52,6 +52,7 @@ impl<'ctx> CodeGen<'ctx> {
 
     /// Creates a minimal `main` function (`i32 ()`) that returns 0.
     /// This is a fallback to guarantee the presence of a valid entry point in the generated binary.
+    /// Also executes any global-scope runtime statements (like print).
     pub fn generate_default_main(&mut self) {
         let main_type = self.context.i32_type().fn_type(&[], false);
         let main_func = self.module.add_function("main", main_type, None);
@@ -59,9 +60,25 @@ impl<'ctx> CodeGen<'ctx> {
         let entry_bb = self.context.append_basic_block(main_func, "entry");
         self.builder.position_at_end(entry_bb);
 
+        // Execute any runtime instructions from global scope (like Print, BinaryOp for runtime values)
+        for instr in &self.globals.clone() {
+            match instr {
+                MirInstr::Print { .. } => {
+                    self.generate_instr(instr);
+                }
+                MirInstr::BinaryOp(_, _, _, _) => {
+                    // Generate runtime binary operations that weren't constant-folded
+                    self.generate_instr(instr);
+                }
+                _ => {
+                    // Other instructions are already handled in generate_global
+                }
+            }
+        }
+
         let zero = self.context.i32_type().const_int(0, false);
         // Generates the `ret i32 0` instruction.
-        self.builder.build_return(Some(&zero));
+        self.builder.build_return(Some(&zero)).unwrap();
     }
 
     /// Generates the LLVM structure and code for a single MIR function.
@@ -84,6 +101,12 @@ impl<'ctx> CodeGen<'ctx> {
         self.map_metadata.clear();
         self.composite_string_ptrs.clear();
         self.composite_strings.clear();
+
+        // Store function return type for RC tracking when this function is called
+        if let Some(ref ret_type_str) = func.return_type {
+            self.function_return_types
+                .insert(func.name.clone(), ret_type_str.clone());
+        }
 
         // Track function parameters for RC handling on return
         self.current_function_params.clear();
@@ -450,10 +473,112 @@ impl<'ctx> CodeGen<'ctx> {
             // Generate the block's terminating instruction (branch, return).
             if let Some(term) = &block.terminator {
                 self.generate_terminator(term, llvm_func, &bb_map);
+            } else {
+                // No terminator - add cleanup and implicit return for void functions
+                self.generate_function_exit_cleanup();
+
+                // Add implicit return void
+                self.builder.build_return(None).unwrap();
             }
         }
 
         llvm_func
+    }
+
+    /// Generate cleanup for all RC variables at function exit
+    /// This ensures variables in conditional blocks are properly cleaned up
+    fn generate_function_exit_cleanup(&mut self) {
+        // Collect all RC variables from symbols (including loop arrays)
+        let mut heap_strings: Vec<String> = self
+            .symbols
+            .keys()
+            .filter(|name| self.heap_strings.contains(*name))
+            .cloned()
+            .collect();
+        heap_strings.reverse();
+
+        let mut heap_arrays: Vec<String> = self
+            .symbols
+            .keys()
+            .filter(|name| self.heap_arrays.contains(*name))
+            .cloned()
+            .collect();
+        heap_arrays.reverse();
+
+        let mut heap_maps: Vec<String> = self
+            .symbols
+            .keys()
+            .filter(|name| self.heap_maps.contains(*name))
+            .cloned()
+            .collect();
+        heap_maps.reverse();
+
+        // Cleanup composite strings in arrays/maps
+        for (_var_name, str_ptrs) in &self.composite_string_ptrs {
+            for str_ptr in str_ptrs {
+                let data_ptr = str_ptr.into_pointer_value();
+                let rc_header = unsafe {
+                    self.builder.build_in_bounds_gep(
+                        self.context.i8_type(),
+                        data_ptr,
+                        &[self.context.i32_type().const_int((-8_i32) as u64, true)],
+                        "rc_header",
+                    )
+                }
+                .unwrap();
+
+                let decref = self.decref_fn.unwrap();
+                self.builder
+                    .build_call(decref, &[rc_header.into()], "")
+                    .unwrap();
+            }
+        }
+
+        // Cleanup arrays
+        for var_name in heap_arrays {
+            self.emit_decref(&var_name);
+        }
+
+        // Cleanup maps
+        for var_name in heap_maps {
+            self.emit_decref(&var_name);
+        }
+
+        // Cleanup strings
+        for var_name in heap_strings {
+            self.emit_decref(&var_name);
+        }
+
+        // Cleanup temporary RC values not in symbols
+        let mut temp_str_vars: Vec<String> = self
+            .temp_values
+            .keys()
+            .filter(|name| self.heap_strings.contains(*name) && !self.symbols.contains_key(*name))
+            .cloned()
+            .collect();
+        temp_str_vars.reverse();
+
+        for var_name in temp_str_vars {
+            if let Some(val) = self.temp_values.get(&var_name) {
+                if val.is_pointer_value() {
+                    let data_ptr = val.into_pointer_value();
+                    let rc_header = unsafe {
+                        self.builder.build_in_bounds_gep(
+                            self.context.i8_type(),
+                            data_ptr,
+                            &[self.context.i32_type().const_int((-8_i32) as u64, true)],
+                            "rc_header",
+                        )
+                    }
+                    .unwrap();
+
+                    let decref = self.decref_fn.unwrap();
+                    self.builder
+                        .build_call(decref, &[rc_header.into()], "")
+                        .unwrap();
+                }
+            }
+        }
     }
 
     /// Generates LLVM IR for a single MIR block.
@@ -749,11 +874,21 @@ impl<'ctx> CodeGen<'ctx> {
                     }
                 }
 
-                // 2. Free arrays
+                // Determine what value is being returned (if any) to exclude it from cleanup
+                let return_value_name = if !values.is_empty() {
+                    Some(values[0].as_str())
+                } else {
+                    None
+                };
+
+                // 2. Free arrays (exclude return value)
                 let mut heap_array_vars: Vec<String> = self
                     .symbols
                     .keys()
-                    .filter(|name| self.heap_arrays.contains(*name))
+                    .filter(|name| {
+                        self.heap_arrays.contains(*name)
+                            && return_value_name.map_or(true, |ret| ret != *name)
+                    })
                     .cloned()
                     .collect();
                 heap_array_vars.reverse();
@@ -762,11 +897,14 @@ impl<'ctx> CodeGen<'ctx> {
                     self.emit_decref(&var_name);
                 }
 
-                // 3. Free maps
+                // 3. Free maps (exclude return value)
                 let mut heap_map_vars: Vec<String> = self
                     .symbols
                     .keys()
-                    .filter(|name| self.heap_maps.contains(*name))
+                    .filter(|name| {
+                        self.heap_maps.contains(*name)
+                            && return_value_name.map_or(true, |ret| ret != *name)
+                    })
                     .cloned()
                     .collect();
                 heap_map_vars.reverse();
@@ -775,17 +913,126 @@ impl<'ctx> CodeGen<'ctx> {
                     self.emit_decref(&var_name);
                 }
 
-                // 4. Free simple strings
+                // 4. Free simple strings from symbols (exclude return value)
                 let mut heap_str_vars: Vec<String> = self
                     .symbols
                     .keys()
-                    .filter(|name| self.heap_strings.contains(*name))
+                    .filter(|name| {
+                        self.heap_strings.contains(*name)
+                            && return_value_name.map_or(true, |ret| ret != *name)
+                    })
                     .cloned()
                     .collect();
                 heap_str_vars.reverse();
 
                 for var_name in heap_str_vars {
                     self.emit_decref(&var_name);
+                }
+
+                // 5. Free temporary RC strings (from temp_values not in symbols, exclude return value)
+                // These are truly temporary values like function call arguments that are not stored
+                let mut temp_str_vars: Vec<String> = self
+                    .temp_values
+                    .keys()
+                    .filter(|name| {
+                        self.heap_strings.contains(*name)
+                            && !self.symbols.contains_key(*name)
+                            && return_value_name.map_or(true, |ret| ret != *name)
+                    })
+                    .cloned()
+                    .collect();
+                temp_str_vars.reverse();
+
+                for var_name in temp_str_vars {
+                    if let Some(val) = self.temp_values.get(&var_name) {
+                        if val.is_pointer_value() {
+                            let data_ptr = val.into_pointer_value();
+                            let rc_header = unsafe {
+                                self.builder.build_in_bounds_gep(
+                                    self.context.i8_type(),
+                                    data_ptr,
+                                    &[self.context.i32_type().const_int((-8_i32) as u64, true)],
+                                    "rc_header",
+                                )
+                            }
+                            .unwrap();
+
+                            let decref = self.decref_fn.unwrap();
+                            self.builder
+                                .build_call(decref, &[rc_header.into()], "")
+                                .unwrap();
+                        }
+                    }
+                }
+
+                // 6. Free temporary RC arrays (from temp_values not in symbols, exclude return value)
+                let mut temp_array_vars: Vec<String> = self
+                    .temp_values
+                    .keys()
+                    .filter(|name| {
+                        self.heap_arrays.contains(*name)
+                            && !self.symbols.contains_key(*name)
+                            && return_value_name.map_or(true, |ret| ret != *name)
+                    })
+                    .cloned()
+                    .collect();
+                temp_array_vars.reverse();
+
+                for var_name in temp_array_vars {
+                    if let Some(val) = self.temp_values.get(&var_name) {
+                        if val.is_pointer_value() {
+                            let data_ptr = val.into_pointer_value();
+                            let rc_header = unsafe {
+                                self.builder.build_in_bounds_gep(
+                                    self.context.i8_type(),
+                                    data_ptr,
+                                    &[self.context.i32_type().const_int((-8_i32) as u64, true)],
+                                    "rc_header",
+                                )
+                            }
+                            .unwrap();
+
+                            let decref = self.decref_fn.unwrap();
+                            self.builder
+                                .build_call(decref, &[rc_header.into()], "")
+                                .unwrap();
+                        }
+                    }
+                }
+
+                // 7. Free temporary RC maps (from temp_values not in symbols, exclude return value)
+                let mut temp_map_vars: Vec<String> = self
+                    .temp_values
+                    .keys()
+                    .filter(|name| {
+                        self.heap_maps.contains(*name)
+                            && !self.symbols.contains_key(*name)
+                            && return_value_name.map_or(true, |ret| ret != *name)
+                    })
+                    .cloned()
+                    .collect();
+                temp_map_vars.reverse();
+
+                for var_name in temp_map_vars {
+                    if let Some(val) = self.temp_values.get(&var_name) {
+                        if val.is_pointer_value() {
+                            let data_ptr = val.into_pointer_value();
+                            let rc_header = unsafe {
+                                self.builder.build_in_bounds_gep(
+                                    self.context.i8_type(),
+                                    data_ptr,
+                                    &[self.context.i32_type().const_int((-8_i32) as u64, true)],
+                                    "rc_header",
+                                )
+                            }
+                            .unwrap();
+
+                            let decref = self.decref_fn.unwrap();
+                            self.builder
+                                .build_call(decref, &[rc_header.into()], "")
+                                .unwrap();
+                        }
+                    }
                 }
 
                 if values.is_empty() {
@@ -847,12 +1094,36 @@ impl<'ctx> CodeGen<'ctx> {
                 then_block,
                 else_block,
             } => {
-                let cond_val = self.resolve_value(cond).into_int_value();
+                let cond_val = self.resolve_value(cond);
+
+                // Check if condition is already i1 (from comparison) or i32 (from bool variable)
+                let cond_i1 = if cond_val.is_int_value() {
+                    let int_val = cond_val.into_int_value();
+                    let int_type = int_val.get_type();
+
+                    if int_type.get_bit_width() == 1 {
+                        // Already i1, use directly
+                        int_val
+                    } else {
+                        // i32 boolean, convert to i1
+                        self.builder
+                            .build_int_compare(
+                                inkwell::IntPredicate::NE,
+                                int_val,
+                                self.context.i32_type().const_zero(),
+                                "cond_i1",
+                            )
+                            .unwrap()
+                    }
+                } else {
+                    panic!("Condition value is not an integer type");
+                };
+
                 let then_bb = bb_map.get(then_block).expect("Then BB not found");
                 let else_bb = bb_map.get(else_block).expect("Else BB not found");
                 // Generates `br i1 %cond, label %then, label %else`
                 self.builder
-                    .build_conditional_branch(cond_val, *then_bb, *else_bb);
+                    .build_conditional_branch(cond_i1, *then_bb, *else_bb);
             }
         }
     }

@@ -211,16 +211,22 @@ impl SemanticAnalyzer {
         self.outer_symbol_table = outer_symbol_table;
         self.symbol_table = local_scope; // only params visible
 
-        // Check for required return statements and verify their types.
+        // Check for required return statements (but don't verify types yet - need body analyzed first).
         if let Some(ret_type) = return_type.as_ref() {
             if *ret_type != TypeNode::Void {
                 self.ensure_has_return(body, name)?;
-                self.verify_return_types(body, ret_type, name)?;
             }
         }
 
         // Analyze function body with isolated scope.
         self.analyze_program(body)?;
+
+        // Now verify return types after body has been analyzed and local variables are in scope.
+        if let Some(ret_type) = return_type.as_ref() {
+            if *ret_type != TypeNode::Void {
+                self.verify_return_types(body, ret_type, name)?;
+            }
+        }
 
         println!(
             "Restoring symbol table for function {}, outer_symbol_table is: {:?}",

@@ -177,6 +177,31 @@ pub fn build_function_decl(builder: &mut MirBuilder, node: &AstNode) {
         // Build MIR for each statement in the function body.
         for stmt in body {
             build_statement(builder, stmt, &mut block);
+
+            // If the statement set a terminator (like a for-loop), subsequent statements
+            // need a new block to avoid adding instructions after the terminator
+            if block.terminator.is_some() {
+                // Save the current block label before adding it
+                let current_block_label = block.label.clone();
+
+                // Add the current block to the function
+                if let Some(current_func) = builder.program.functions.last_mut() {
+                    current_func.blocks.push(block.clone());
+                }
+
+                // Create a new block for the next statement
+                let next_label = builder.next_block();
+                let next_block_label = next_label.clone();
+                block = MirBlock {
+                    label: next_label,
+                    instrs: vec![],
+                    terminator: None,
+                };
+
+                // Don't connect loop exit blocks to continuation blocks
+                // Let them remain without terminators so they can get return statements added
+                // Only connect if there are actually more statements coming
+            }
         }
 
         // Check if there are loop blocks BEFORE we do anything else
@@ -254,31 +279,42 @@ pub fn build_function_decl(builder: &mut MirBuilder, node: &AstNode) {
 
         // Add cleanup to the appropriate block (ONLY ONCE)
         if has_loop_blocks {
-            // Add cleanup to the LAST block (after all loops complete)
+            // Add cleanup and return to ALL blocks without terminators
+            // (these are the blocks where execution could end)
             if let Some(func) = builder.program.functions.last_mut() {
-                let last_block_label = func.blocks.last().map(|b| b.label.clone());
+                // Collect blocks that need cleanup (no terminator, not entry)
+                let blocks_needing_cleanup: Vec<String> = func
+                    .blocks
+                    .iter()
+                    .filter(|b| b.terminator.is_none() && b.label != entry_label)
+                    .map(|b| b.label.clone())
+                    .collect();
 
-                if let Some(label) = last_block_label {
-                    // Find the block with this label and add cleanup
-                    if let Some(last_block) = func.blocks.iter_mut().find(|b| b.label == label) {
+                eprintln!(
+                    "[DEBUG] Function '{}': Blocks needing cleanup: {:?}",
+                    name, blocks_needing_cleanup
+                );
+
+                for block_label in blocks_needing_cleanup {
+                    if let Some(final_block) =
+                        func.blocks.iter_mut().find(|b| b.label == block_label)
+                    {
                         eprintln!(
-                            "[DEBUG] Function '{}': Adding RC cleanup to final block '{}'",
-                            name, label
+                            "[DEBUG] Function '{}': Adding RC cleanup to block '{}'",
+                            name, block_label
                         );
 
-                        // Add decrefs to the last block
-                        for decref_instr in decref_instrs {
-                            last_block.instrs.push(decref_instr);
+                        // Add decrefs to this block
+                        for decref_instr in &decref_instrs {
+                            final_block.instrs.push(decref_instr.clone());
                         }
 
-                        // Add return to the last block if it doesn't have a terminator
-                        if last_block.terminator.is_none() {
-                            last_block.terminator = Some(MirInstr::Return { values: vec![] });
-                            eprintln!(
-                                "[DEBUG] Function '{}': Added return to final block '{}'",
-                                name, label
-                            );
-                        }
+                        // Add return
+                        final_block.terminator = Some(MirInstr::Return { values: vec![] });
+                        eprintln!(
+                            "[DEBUG] Function '{}': Added return to block '{}'",
+                            name, block_label
+                        );
                     }
                 }
             }

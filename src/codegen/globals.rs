@@ -85,8 +85,13 @@ impl<'ctx> CodeGen<'ctx> {
                     "add" => lhs_val.const_add(rhs_val),
                     "sub" => lhs_val.const_sub(rhs_val),
                     "mul" => lhs_val.const_mul(rhs_val),
+                    "eq" => lhs_val.const_int_compare(inkwell::IntPredicate::EQ, rhs_val),
+                    "ne" => lhs_val.const_int_compare(inkwell::IntPredicate::NE, rhs_val),
                     "lt" => lhs_val.const_int_compare(inkwell::IntPredicate::SLT, rhs_val),
-                    _ => panic!("Unsupported binary op: {}", op),
+                    "le" => lhs_val.const_int_compare(inkwell::IntPredicate::SLE, rhs_val),
+                    "gt" => lhs_val.const_int_compare(inkwell::IntPredicate::SGT, rhs_val),
+                    "ge" => lhs_val.const_int_compare(inkwell::IntPredicate::SGE, rhs_val),
+                    _ => panic!("Unsupported binary op in globals: {}. Note: div and mod are not supported for global constants.", op),
                 };
                 // Store the result as a new constant value.
                 self.temp_values.insert(dst.clone(), res.into());
@@ -138,6 +143,16 @@ impl<'ctx> CodeGen<'ctx> {
                         ty: val.get_type(),
                     },
                 );
+
+                // Copy array metadata if the value has it
+                if let Some(metadata) = self.array_metadata.get(value).cloned() {
+                    self.array_metadata.insert(name.clone(), metadata);
+                }
+
+                // Copy map metadata if the value has it
+                if let Some(metadata) = self.map_metadata.get(value).cloned() {
+                    self.map_metadata.insert(name.clone(), metadata);
+                }
             }
             // Handles string concatenation at compile time (global scope).
             MirInstr::StringConcat { name, left, right } => {
@@ -177,6 +192,16 @@ impl<'ctx> CodeGen<'ctx> {
                 let elem_type = first_val.get_type();
                 let _array_type = elem_type.array_type(elements.len() as u32);
 
+                // Determine element type name and if it contains strings
+                let element_type_name = if elem_type.is_int_type() {
+                    "Int"
+                } else if elem_type.is_pointer_type() {
+                    "Str"
+                } else {
+                    "Unknown"
+                };
+                let contains_strings = elem_type.is_pointer_type();
+
                 // Create the constant array initializer based on element type.
                 let const_array = if elem_type.is_int_type() {
                     // Use Inkwell's simple const_array for arrays of primitive integers.
@@ -195,6 +220,14 @@ impl<'ctx> CodeGen<'ctx> {
 
                 // Store the final constant array value.
                 self.temp_values.insert(name.clone(), const_array);
+
+                // Create and store metadata for the array
+                let metadata = crate::codegen::ArrayMetadata {
+                    length: elements.len(),
+                    element_type: element_type_name.to_string(),
+                    contains_strings,
+                };
+                self.array_metadata.insert(name.clone(), metadata);
             }
             // Handles constant map initialization, represented as an array of structs.
             MirInstr::Map { name, entries } => {
@@ -205,6 +238,22 @@ impl<'ctx> CodeGen<'ctx> {
                 let val_type = first_val.get_type();
                 // Define the structure type {KeyType, ValueType}.
                 let pair_type = self.context.struct_type(&[key_type, val_type], false);
+
+                // Determine type names for metadata
+                let key_type_name = if key_type.is_int_type() {
+                    "Int"
+                } else if key_type.is_pointer_type() {
+                    "Str"
+                } else {
+                    "Unknown"
+                };
+                let value_type_name = if val_type.is_int_type() {
+                    "Int"
+                } else if val_type.is_pointer_type() {
+                    "Str"
+                } else {
+                    "Unknown"
+                };
 
                 // Build ALL struct entries using the defined pair type.
                 let struct_values: Vec<BasicValueEnum<'ctx>> = entries
@@ -225,6 +274,16 @@ impl<'ctx> CodeGen<'ctx> {
 
                 // Store the final constant map value.
                 self.temp_values.insert(name.clone(), const_array);
+
+                // Create and store metadata for the map
+                let metadata = crate::codegen::MapMetadata {
+                    length: entries.len(),
+                    key_type: key_type_name.to_string(),
+                    value_type: value_type_name.to_string(),
+                    key_is_string: key_type.is_pointer_type(),
+                    value_is_string: val_type.is_pointer_type(),
+                };
+                self.map_metadata.insert(name.clone(), metadata);
             }
             // Ignore other MIR instructions
             _ => {}
