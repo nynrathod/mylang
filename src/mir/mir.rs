@@ -93,10 +93,19 @@ pub enum MirInstr {
         index: String,
         value: String,
     },
+    MapLen {
+        name: String,
+        map: String,
+    },
     MapGet {
         name: String,
         map: String,
         key: String,
+    },
+    MapGetPair {
+        name: String,
+        map: String,
+        index: String,
     },
     MapSet {
         map: String,
@@ -133,6 +142,11 @@ pub enum MirInstr {
     TupleExtract {
         name: String,
         source: String,
+        index: usize,
+    },
+    TupleGet {
+        name: String,
+        tuple: String,
         index: usize,
     },
 

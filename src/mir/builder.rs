@@ -120,8 +120,7 @@ impl MirBuilder {
                     self.program.globals.extend(instrs);
                 }
                 AstNode::FunctionDecl { .. } => {
-                    let func = build_function_decl(self, node);
-                    self.program.functions.push(func);
+                    build_function_decl(self, node);
                 }
 
                 // Handle struct declarations (type definitions, not instances).
@@ -349,14 +348,40 @@ impl MirBuilder {
     }
 
     /// Finalize the MIR program: clean up and lightweight optimizations.
-    /// - Removes empty blocks.
+    /// - Removes empty blocks (but keeps referenced ones).
     /// - Deduplicates global constants/assignments.
     /// - Optionally merges consecutive assignments to the same target.
     pub fn finalize(&mut self) {
         // 1. Remove empty blocks (blocks without instructions and no terminator)
+        //    BUT: keep blocks that are referenced by other blocks
         for func in &mut self.program.functions {
-            func.blocks
-                .retain(|block| !block.instrs.is_empty() || block.terminator.is_some());
+            // collect all referenced block labels
+            let mut referenced_blocks = HashSet::new();
+            for block in &func.blocks {
+                if let Some(term) = &block.terminator {
+                    match term {
+                        MirInstr::Jump { target } => {
+                            referenced_blocks.insert(target.clone());
+                        }
+                        MirInstr::CondJump {
+                            then_block,
+                            else_block,
+                            ..
+                        } => {
+                            referenced_blocks.insert(then_block.clone());
+                            referenced_blocks.insert(else_block.clone());
+                        }
+                        _ => {}
+                    }
+                }
+            }
+
+            // Now remove only empty blocks that are NOT referenced
+            func.blocks.retain(|block| {
+                !block.instrs.is_empty()
+                    || block.terminator.is_some()
+                    || referenced_blocks.contains(&block.label)
+            });
         }
 
         // 2. Deduplicate global constants / assignments by name
