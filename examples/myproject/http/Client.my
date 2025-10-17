@@ -1,0 +1,7 @@
+fn Fetchuser(id: Int) -> Str {
+    return "User fetched";
+}
+
+fn FetchuserTw(id: Int) -> Str {
+    return "User fetched2";
+}
