@@ -207,11 +207,16 @@ impl SemanticAnalyzer {
     ) -> Result<(), SemanticError> {
         // Create module key for circular import detection
         let module_key = path.join("::");
-
-        // Check for circular imports
-        if self.imported_modules.contains_key(&module_key) {
-            return Ok(()); // Already imported, skip
+        
+        // If importing a specific symbol, check if that symbol is already imported
+        if let Some(sym) = symbol {
+            if self.function_table.contains_key(sym) {
+                return Ok(()); // Symbol already imported, skip
+            }
         }
+
+        // Check if we've already fully analyzed this module (for wildcard imports)
+        let already_analyzed = self.imported_modules.contains_key(&module_key);
 
         let file_path = self.resolve_module_path(path, symbol).ok_or_else(|| {
             let full_path = if let Some(sym) = symbol {
@@ -222,60 +227,103 @@ impl SemanticAnalyzer {
             SemanticError::ModuleNotFound(full_path)
         })?;
 
-        let code = fs::read_to_string(&file_path)
-            .map_err(|_| SemanticError::ModuleNotFound(file_path.display().to_string()))?;
-
-        // Mark this module as being imported
-        self.imported_modules.insert(module_key, true);
-
-        let tokens = crate::lexar::lexer::lex(&code);
-        let mut parser = crate::parser::Parser::new(&tokens);
-        let ast = parser
-            .parse_program()
-            .map_err(|_| SemanticError::ParseError)?;
-
-        // Recursively analyze the imported AST
-        if let crate::parser::ast::AstNode::Program(mut nodes) = ast {
-            // Create a temporary analyzer to collect public functions from the imported module
-            let mut imported_analyzer = SemanticAnalyzer::new();
-            // Use analyze_program for proper two-pass analysis
-            imported_analyzer.analyze_program(&mut nodes)?;
+        // If this module was already analyzed, we can reuse the cached analysis
+        // We only need to parse and analyze once per module file
+        let (nodes, imported_analyzer) = if already_analyzed {
+            // Module already analyzed, just parse to get the AST nodes
+            let code = fs::read_to_string(&file_path)
+                .map_err(|_| SemanticError::ModuleNotFound(file_path.display().to_string()))?;
+            let tokens = crate::lexar::lexer::lex(&code);
+            let mut parser = crate::parser::Parser::new(&tokens);
+            let ast = parser
+                .parse_program()
+                .map_err(|_| SemanticError::ParseError)?;
             
-            // Merge public functions from imported module into current function table
-            // AND store the function AST nodes for MIR generation
-            for node in nodes {
-                if let AstNode::FunctionDecl { name, .. } = &node {
-                    // Only import functions that start with uppercase (public convention)
-                    if name.chars().next().unwrap_or('a').is_uppercase() {
-                        // If a specific symbol was requested, only import that symbol
-                        if let Some(sym) = symbol {
-                            if name == sym {
-                                // Store AST node for MIR generation
-                                self.imported_functions.push(node.clone());
-                                // Copy function signature to current function table
-                                if let Some((params, ret)) = imported_analyzer.function_table.get(name) {
-                                    self.function_table.insert(name.clone(), (params.clone(), ret.clone()));
+            if let crate::parser::ast::AstNode::Program(nodes) = ast {
+                // Create a temporary analyzer and analyze (will be fast since already done)
+                let mut imported_analyzer = SemanticAnalyzer::new();
+                let mut nodes_mut = nodes.clone();
+                imported_analyzer.analyze_program(&mut nodes_mut)?;
+                (nodes, imported_analyzer)
+            } else {
+                return Ok(());
+            }
+        } else {
+            // First time analyzing this module
+            let code = fs::read_to_string(&file_path)
+                .map_err(|_| SemanticError::ModuleNotFound(file_path.display().to_string()))?;
+
+            // Mark this module as being imported
+            self.imported_modules.insert(module_key, true);
+
+            let tokens = crate::lexar::lexer::lex(&code);
+            let mut parser = crate::parser::Parser::new(&tokens);
+            let ast = parser
+                .parse_program()
+                .map_err(|_| SemanticError::ParseError)?;
+
+            // Recursively analyze the imported AST
+            if let crate::parser::ast::AstNode::Program(mut nodes) = ast {
+                // Create a temporary analyzer to collect public functions from the imported module
+                let mut imported_analyzer = SemanticAnalyzer::new();
+                // Use analyze_program for proper two-pass analysis
+                imported_analyzer.analyze_program(&mut nodes)?;
+                (nodes, imported_analyzer)
+            } else {
+                return Ok(());
+            }
+        };
+
+        // Merge public functions from imported module into current function table
+        // AND store the function AST nodes for MIR generation
+        for node in nodes {
+            if let AstNode::FunctionDecl { name, .. } = &node {
+                // Only import functions that start with uppercase (public convention)
+                if name.chars().next().unwrap_or('a').is_uppercase() {
+                    // If a specific symbol was requested, only import that symbol
+                    if let Some(sym) = symbol {
+                        if name == sym {
+                            // Store AST node for MIR generation (only if not already stored)
+                            if !self.imported_functions.iter().any(|n| {
+                                if let AstNode::FunctionDecl { name: fn_name, .. } = n {
+                                    fn_name == name
+                                } else {
+                                    false
                                 }
+                            }) {
+                                self.imported_functions.push(node.clone());
                             }
-                        } else {
-                            // No specific symbol - import all public functions
-                            self.imported_functions.push(node.clone());
+                            // Copy function signature to current function table
                             if let Some((params, ret)) = imported_analyzer.function_table.get(name) {
                                 self.function_table.insert(name.clone(), (params.clone(), ret.clone()));
                             }
                         }
+                    } else {
+                        // No specific symbol - import all public functions
+                        if !self.imported_functions.iter().any(|n| {
+                            if let AstNode::FunctionDecl { name: fn_name, .. } = n {
+                                fn_name == name
+                            } else {
+                                false
+                            }
+                        }) {
+                            self.imported_functions.push(node.clone());
+                        }
+                        if let Some((params, ret)) = imported_analyzer.function_table.get(name) {
+                            self.function_table.insert(name.clone(), (params.clone(), ret.clone()));
+                        }
                     }
                 }
             }
-            
-            // If a specific symbol was requested, verify it exists
-            if let Some(sym) = symbol {
-                // Check if the symbol exists in function_table or symbol_table
-                if !self.function_table.contains_key(sym) && !self.symbol_table.contains_key(sym) {
-                    return Err(SemanticError::UndeclaredFunction(NamedError {
-                        name: sym.clone(),
-                    }));
-                }
+        }
+        
+        // If a specific symbol was requested, verify it exists
+        if let Some(sym) = symbol {
+            // Check if the symbol exists in function_table or symbol_table
+            if !self.function_table.contains_key(sym) && !self.symbol_table.contains_key(sym) {
+                return Err(SemanticError::UndeclaredFunction(NamedError {
+                    name: sym.clone(),
+                }));
             }
         }
         Ok(())
