@@ -128,21 +128,8 @@ impl SemanticAnalyzer {
         return_type: &mut Option<TypeNode>,
         body: &mut Vec<AstNode>,
     ) -> Result<(), SemanticError> {
-        // If function already defined, return error.
-        if self.function_table.contains_key(name) {
-            return Err(SemanticError::FunctionRedeclaration(NamedError {
-                name: name.to_string(),
-            }));
-        }
-        let param_types: Vec<TypeNode> = params.iter().map(|(_, t)| t.clone().unwrap()).collect();
-
-        // Add function signature to function table ONLY if name is uppercase (public function).
-        if name.chars().next().unwrap_or('a').is_uppercase() {
-            self.function_table.insert(
-                name.to_string(),
-                (param_types, return_type.clone().unwrap_or(TypeNode::Void)),
-            );
-        }
+        // Function signature is already registered in analyze_program's first pass
+        // No need to check for redeclaration or add to function_table here
 
         // Is public or private function
         // Enforce public function naming convention.

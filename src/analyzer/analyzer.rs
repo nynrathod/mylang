@@ -44,9 +44,48 @@ impl SemanticAnalyzer {
 
     /// Analyze a list of AST nodes (entire program or a block).
     /// Returns Ok if all nodes are semantically valid, or an error otherwise.
+    /// Uses a two-pass approach:
+    /// 1. First pass: Process imports and register all function signatures (for forward references)
+    /// 2. Second pass: Analyze function bodies and other statements
     pub fn analyze_program(&mut self, nodes: &mut Vec<AstNode>) -> Result<(), SemanticError> {
+        // FIRST PASS: Process imports and register all function signatures
+        for node in nodes.iter_mut() {
+            match node {
+                // Process imports first to load external functions
+                AstNode::Import { path, symbol } => {
+                    self.import_module(path, symbol)?;
+                }
+                // Register local function signatures
+                AstNode::FunctionDecl { name, params, return_type, .. } => {
+                    // Check if function already defined
+                    if self.function_table.contains_key(name) {
+                        return Err(SemanticError::FunctionRedeclaration(NamedError {
+                            name: name.to_string(),
+                        }));
+                    }
+                    
+                    // Collect parameter types
+                    let param_types: Vec<TypeNode> = params
+                        .iter()
+                        .map(|(_, t)| t.clone().unwrap_or(TypeNode::Int))
+                        .collect();
+                    
+                    // Register function signature (all functions, not just public ones)
+                    self.function_table.insert(
+                        name.to_string(),
+                        (param_types, return_type.clone().unwrap_or(TypeNode::Void)),
+                    );
+                }
+                _ => {} // Skip other nodes in first pass
+            }
+        }
+        
+        // SECOND PASS: Analyze all nodes (including function bodies)
+        // Skip imports as they're already processed
         for node in nodes {
-            self.analyze_node(node)?;
+            if !matches!(node, AstNode::Import { .. }) {
+                self.analyze_node(node)?;
+            }
         }
         Ok(())
     }
@@ -77,11 +116,8 @@ impl SemanticAnalyzer {
             AstNode::StructDecl { .. } => self.analyze_struct(node),
             AstNode::EnumDecl { .. } => self.analyze_enum(node),
 
-            // Import statement
-            AstNode::Import { path, symbol } => {
-                self.import_module(path, symbol)?;
-                Ok(())
-            }
+            // Import statement - already processed in first pass of analyze_program
+            AstNode::Import { .. } => Ok(()),
 
             // Statements
             AstNode::Assignment { pattern, value } => self.analyze_assignment(pattern, value),
@@ -202,11 +238,10 @@ impl SemanticAnalyzer {
         if let crate::parser::ast::AstNode::Program(mut nodes) = ast {
             // Create a temporary analyzer to collect public functions from the imported module
             let mut imported_analyzer = SemanticAnalyzer::new();
-            for node in &mut nodes {
-                imported_analyzer.analyze_node(node)?;
-            }
+            // Use analyze_program for proper two-pass analysis
+            imported_analyzer.analyze_program(&mut nodes)?;
             
-            // Merge public functions from imported module into global function table
+            // Merge public functions from imported module into current function table
             // AND store the function AST nodes for MIR generation
             for node in nodes {
                 if let AstNode::FunctionDecl { name, .. } = &node {
@@ -215,7 +250,9 @@ impl SemanticAnalyzer {
                         // If a specific symbol was requested, only import that symbol
                         if let Some(sym) = symbol {
                             if name == sym {
+                                // Store AST node for MIR generation
                                 self.imported_functions.push(node.clone());
+                                // Copy function signature to current function table
                                 if let Some((params, ret)) = imported_analyzer.function_table.get(name) {
                                     self.function_table.insert(name.clone(), (params.clone(), ret.clone()));
                                 }
