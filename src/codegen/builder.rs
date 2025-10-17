@@ -2874,9 +2874,19 @@ impl<'ctx> CodeGen<'ctx> {
         let metadata = self.array_metadata.get(array_name).cloned();
 
         if let Some(metadata) = metadata {
-            // Get pointer to the array (not the loaded value)
+            // Get pointer to the array data
             let array_ptr = if self.symbols.contains_key(array_name) {
-                self.resolve_pointer(array_name)
+                // Variable case: resolve_pointer gives us the alloca,
+                // we need to load the actual array pointer from it
+                let var_alloca = self.resolve_pointer(array_name);
+                self.builder
+                    .build_load(
+                        self.context.ptr_type(AddressSpace::default()),
+                        var_alloca,
+                        "array_data_ptr",
+                    )
+                    .unwrap()
+                    .into_pointer_value()
             } else {
                 // For temporary arrays, resolve_value should work
                 self.resolve_value(array_name).into_pointer_value()
@@ -2983,11 +2993,20 @@ impl<'ctx> CodeGen<'ctx> {
         let metadata = self.map_metadata.get(map_name).cloned();
 
         if let Some(metadata) = metadata {
-            // Get pointer to the map (not the loaded value)
+            // Get pointer to the map data
             let map_ptr = if self.symbols.contains_key(map_name) {
-                self.resolve_pointer(map_name)
+                // Variable case: resolve_pointer gives us the alloca,
+                // we need to load the actual map pointer from it
+                let var_alloca = self.resolve_pointer(map_name);
+                self.builder
+                    .build_load(
+                        self.context.ptr_type(AddressSpace::default()),
+                        var_alloca,
+                        "map_data_ptr",
+                    )
+                    .unwrap()
+                    .into_pointer_value()
             } else {
-                // For temporary maps, resolve_value should work
                 self.resolve_value(map_name).into_pointer_value()
             };
 
