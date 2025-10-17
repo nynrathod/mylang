@@ -174,6 +174,9 @@ pub fn build_function_decl(builder: &mut MirBuilder, node: &AstNode) {
             // The function borrows them, and caller handles cleanup
         }
 
+        // Track if we've already pushed the final block (to avoid duplicate insertion)
+        let mut final_block_pushed = false;
+
         // Build MIR for each statement in the function body.
         for stmt in body {
             build_statement(builder, stmt, &mut block);
@@ -187,6 +190,7 @@ pub fn build_function_decl(builder: &mut MirBuilder, node: &AstNode) {
                 // Add the current block to the function
                 if let Some(current_func) = builder.program.functions.last_mut() {
                     current_func.blocks.push(block.clone());
+                    final_block_pushed = true;
                 }
 
                 // Create a new block for the next statement
@@ -197,6 +201,7 @@ pub fn build_function_decl(builder: &mut MirBuilder, node: &AstNode) {
                     instrs: vec![],
                     terminator: None,
                 };
+                final_block_pushed = false;
 
                 // Don't connect loop exit blocks to continuation blocks
                 // Let them remain without terminators so they can get return statements added
@@ -253,12 +258,20 @@ pub fn build_function_decl(builder: &mut MirBuilder, node: &AstNode) {
         }
 
         // Insert the entry block at the BEGINNING of the function's blocks
-        if let Some(func) = builder.program.functions.last_mut() {
-            func.blocks.insert(0, block);
+        // Only if it wasn't already pushed (to avoid duplicates)
+        if !final_block_pushed {
+            if let Some(func) = builder.program.functions.last_mut() {
+                func.blocks.insert(0, block);
+                eprintln!(
+                    "[DEBUG] Function '{}': Inserted entry block, total blocks = {}",
+                    name,
+                    func.blocks.len()
+                );
+            }
+        } else {
             eprintln!(
-                "[DEBUG] Function '{}': Inserted entry block, total blocks = {}",
-                name,
-                func.blocks.len()
+                "[DEBUG] Function '{}': Final block already pushed, not inserting at position 0",
+                name
             );
         }
 
@@ -309,12 +322,19 @@ pub fn build_function_decl(builder: &mut MirBuilder, node: &AstNode) {
                             final_block.instrs.push(decref_instr.clone());
                         }
 
-                        // Add return
-                        final_block.terminator = Some(MirInstr::Return { values: vec![] });
-                        eprintln!(
-                            "[DEBUG] Function '{}': Added return to block '{}'",
-                            name, block_label
-                        );
+                        // Only add return if function is void
+                        if return_type.is_none() {
+                            final_block.terminator = Some(MirInstr::Return { values: vec![] });
+                            eprintln!(
+                                "[DEBUG] Function '{}': Added void return to block '{}'",
+                                name, block_label
+                            );
+                        } else {
+                            eprintln!(
+                                "[DEBUG] Function '{}': Block '{}' has no terminator but function returns {:?}, leaving as-is",
+                                name, block_label, return_type.as_ref().unwrap()
+                            );
+                        }
                     }
                 }
             }

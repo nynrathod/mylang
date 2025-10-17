@@ -1543,10 +1543,22 @@ impl<'ctx> CodeGen<'ctx> {
                 // Print each value with a space separator, newline at the end
                 for (idx, value) in values.iter().enumerate() {
                     // Check if it's an array or map BEFORE resolving the value
-                    let is_array =
-                        self.array_metadata.contains_key(value) || self.heap_arrays.contains(value);
-                    let is_map =
-                        self.map_metadata.contains_key(value) || self.heap_maps.contains(value);
+                    // But exclude single-char variables and common loop variables
+                    let value_base = value.trim_start_matches('%').trim_end_matches("_array");
+                    let is_single_char = value_base.len() == 1;
+                    let is_common_loop_var = matches!(
+                        value_base,
+                        "item" | "elem" | "element" | "key" | "val" | "value" | "n"
+                    );
+
+                    let is_array = !is_single_char
+                        && !is_common_loop_var
+                        && (self.array_metadata.contains_key(value)
+                            || self.heap_arrays.contains(value));
+                    let is_map = !is_single_char
+                        && !is_common_loop_var
+                        && (self.map_metadata.contains_key(value)
+                            || self.heap_maps.contains(value));
 
                     if is_array {
                         // Print array as [elem1, elem2, ...]
@@ -1795,7 +1807,7 @@ impl<'ctx> CodeGen<'ctx> {
         // Layout: [RC: 4 bytes][Length: 4 bytes][data...]
         let malloc_fn = self.get_or_declare_malloc();
         let array_size = array_type.size_of().unwrap();
-        let header_size = self.context.i32_type().const_int(8, false); // RC + Length = 8 bytes
+        let header_size = self.context.i64_type().const_int(8, false); // RC + Length = 8 bytes (use i64)
         let total_size = self
             .builder
             .build_int_add(header_size, array_size, "total_size")
@@ -1986,7 +1998,7 @@ impl<'ctx> CodeGen<'ctx> {
         // HEAP ALLOCATE with RC header
         let malloc_fn = self.get_or_declare_malloc();
         let map_size = map_type.size_of().unwrap();
-        let total_size = self.context.i32_type().const_int(8, false);
+        let total_size = self.context.i64_type().const_int(8, false); // Use i64 for header size
         let total_size = self
             .builder
             .build_int_add(total_size, map_size, "total_size")
@@ -2245,15 +2257,26 @@ impl<'ctx> CodeGen<'ctx> {
                 .trim_start_matches('%');
             let dest_base = dest_name.trim_end_matches("_array").trim_start_matches('%');
 
-            if meta_base == source_base
-                || meta_base == dest_base
-                || meta_name.contains(source_name)
-                || source_name.contains(meta_name.as_str())
-                || meta_name.contains(dest_name)
-                || dest_name.contains(meta_name.as_str())
-            {
+            // Calculate dest_base_name first
+            let dest_base_name = dest_name.trim_start_matches('%').trim_end_matches("_array");
+
+            // STRICT FILTERING: Never propagate to loop item variables
+            // Don't propagate to:
+            // 1. Single character variable names (after trimming % and _array)
+            // 2. Very short names (2 chars or less)
+            // 3. Common loop variable patterns
+            let is_single_char = dest_base_name.len() == 1;
+            let is_short_var = dest_base_name.len() <= 2;
+            let is_common_loop_var = matches!(
+                dest_base_name,
+                "item" | "elem" | "element" | "key" | "val" | "value"
+            );
+
+            // Only allow exact base name matches, no substring matching
+            let is_exact_match = meta_base == source_base || meta_base == dest_base;
+
+            if !is_single_char && !is_short_var && !is_common_loop_var && is_exact_match {
                 // Register under EXTENSIVE variations
-                let dest_base_name = dest_name.trim_start_matches('%').trim_end_matches("_array");
                 let dest_variations = vec![
                     dest_name.to_string(),
                     dest_name.trim_end_matches("_array").to_string(),

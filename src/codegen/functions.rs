@@ -390,7 +390,7 @@ impl<'ctx> CodeGen<'ctx> {
 
         // Allocate stack space for cross-block variables with correct types
         for var in &cross_block_vars {
-            if !self.symbols.contains_key(var) && !var.starts_with('%') {
+            if !self.symbols.contains_key(var) {
                 // Determine the correct type for this variable
                 let var_type = var_types.get(var).copied().unwrap_or_else(|| {
                     // Index and end variables are always i32
@@ -474,11 +474,20 @@ impl<'ctx> CodeGen<'ctx> {
             if let Some(term) = &block.terminator {
                 self.generate_terminator(term, llvm_func, &bb_map);
             } else {
-                // No terminator - add cleanup and implicit return for void functions
-                self.generate_function_exit_cleanup();
+                // No terminator - check if function is void or non-void
+                let fn_type = llvm_func.get_type();
+                let return_type = fn_type.get_return_type();
 
-                // Add implicit return void
-                self.builder.build_return(None).unwrap();
+                if return_type.is_none() {
+                    // Void function - add cleanup and return void
+                    self.generate_function_exit_cleanup();
+                    self.builder.build_return(None).unwrap();
+                } else {
+                    // Non-void function without terminator - this is an unreachable block
+                    // Just add cleanup but no return (LLVM will handle unreachable)
+                    self.generate_function_exit_cleanup();
+                    self.builder.build_unreachable().unwrap();
+                }
             }
         }
 

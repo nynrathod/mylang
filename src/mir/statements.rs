@@ -1097,8 +1097,23 @@ pub fn build_statement(builder: &mut MirBuilder, stmt: &AstNode, block: &mut Mir
             builder.exit_loop(); // Important: exit loop context
 
             // Create a fresh block for subsequent statements (don't reuse the pushed block)
+            let continuation_label = builder.next_block();
+
+            // Connect the loop exit block to the continuation block
+            if let Some(current_func) = builder.program.functions.last_mut() {
+                // Find the loop exit block (should be the last block with no terminator)
+                for exit_block in current_func.blocks.iter_mut().rev() {
+                    if exit_block.terminator.is_none() {
+                        exit_block.terminator = Some(MirInstr::Jump {
+                            target: continuation_label.clone(),
+                        });
+                        break;
+                    }
+                }
+            }
+
             *block = MirBlock {
-                label: builder.next_block(),
+                label: continuation_label,
                 instrs: vec![],
                 terminator: None,
             };
