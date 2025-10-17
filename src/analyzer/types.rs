@@ -109,4 +109,8 @@ pub enum SemanticError {
         enum_name: String,
         variant: String,
     },
+
+    // --- Module Import Errors ---
+    ModuleNotFound(String),
+    ParseError,
 }

@@ -136,11 +136,13 @@ impl SemanticAnalyzer {
         }
         let param_types: Vec<TypeNode> = params.iter().map(|(_, t)| t.clone().unwrap()).collect();
 
-        // Add function signature to function table.
-        self.function_table.insert(
-            name.to_string(),
-            (param_types, return_type.clone().unwrap_or(TypeNode::Void)),
-        );
+        // Add function signature to function table ONLY if name is uppercase (public function).
+        if name.chars().next().unwrap_or('a').is_uppercase() {
+            self.function_table.insert(
+                name.to_string(),
+                (param_types, return_type.clone().unwrap_or(TypeNode::Void)),
+            );
+        }
 
         // Is public or private function
         // Enforce public function naming convention.

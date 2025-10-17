@@ -1,6 +1,8 @@
 use crate::analyzer::types::{NamedError, SemanticError};
 use crate::parser::ast::{AstNode, Pattern, TypeNode};
 use std::collections::HashMap;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug)]
 pub struct SymbolInfo {
@@ -16,15 +18,25 @@ pub struct SemanticAnalyzer {
     pub(crate) function_table: HashMap<String, (Vec<TypeNode>, TypeNode)>, // Function signatures
 
     pub(crate) outer_symbol_table: Option<HashMap<String, SymbolInfo>>, // For nested scopes
+    pub(crate) project_root: PathBuf, // Root directory for module resolution
+    pub(crate) imported_modules: HashMap<String, bool>, // Track imported modules to prevent circular imports
 }
 
 impl SemanticAnalyzer {
     /// Create a new semantic analyzer with empty symbol/function tables.
     pub fn new() -> Self {
+        // Set project root to X:\Projects\mylang\myproject
+        // Use environment variable or current working directory
+        let project_root = std::env::current_dir().unwrap().join("myproject");
+
+        println!("[DEBUG] Project root set to: {:?}", project_root);
+
         Self {
             symbol_table: HashMap::new(),
             function_table: HashMap::new(),
             outer_symbol_table: None,
+            project_root,
+            imported_modules: HashMap::new(),
         }
     }
 
@@ -63,6 +75,12 @@ impl SemanticAnalyzer {
             AstNode::StructDecl { .. } => self.analyze_struct(node),
             AstNode::EnumDecl { .. } => self.analyze_enum(node),
 
+            // Import statement
+            AstNode::Import { path, symbol } => {
+                self.import_module(path, symbol)?;
+                Ok(())
+            }
+
             // Statements
             AstNode::Assignment { pattern, value } => self.analyze_assignment(pattern, value),
             AstNode::Return { values } => {
@@ -96,5 +114,112 @@ impl SemanticAnalyzer {
                 Ok(())
             }
         }
+    }
+
+    /// Resolve a module path (e.g., ["http", "Client"]) to a file path
+    /// For import http::Client::Fetchuser, we want http/Client.my
+    /// The last element before the symbol is the file name
+    fn resolve_module_path(&self, path: &[String], symbol: &Option<String>) -> Option<PathBuf> {
+        let mut buf = self.project_root.clone();
+
+        // If we have a symbol, the path is module path + file name
+        // e.g., ["http", "Client"] with symbol "Fetchuser" -> http/Client.my
+        // If no symbol, treat last element as file name
+        // e.g., ["http", "Client"] with no symbol -> http/Client.my
+
+        println!("[DEBUG] Resolving path: {:?}, symbol: {:?}", path, symbol);
+        println!("[DEBUG] Starting from project root: {:?}", buf);
+
+        for part in path {
+            buf.push(part);
+        }
+        buf.set_extension("my");
+
+        println!("[DEBUG] Final resolved path: {:?}", buf);
+        println!("[DEBUG] File exists: {}", buf.exists());
+
+        if buf.exists() {
+            Some(buf)
+        } else {
+            // Try to list directory contents for debugging
+            if let Some(parent) = buf.parent() {
+                if parent.exists() {
+                    println!("[DEBUG] Parent directory exists: {:?}", parent);
+                    if let Ok(entries) = std::fs::read_dir(parent) {
+                        println!("[DEBUG] Directory contents:");
+                        for entry in entries {
+                            if let Ok(entry) = entry {
+                                println!("[DEBUG]   - {:?}", entry.file_name());
+                            }
+                        }
+                    }
+                } else {
+                    println!("[DEBUG] Parent directory does not exist: {:?}", parent);
+                }
+            }
+            None
+        }
+    }
+
+    /// Import a module and merge its symbols/types/functions into the current scope
+    fn import_module(
+        &mut self,
+        path: &[String],
+        symbol: &Option<String>,
+    ) -> Result<(), SemanticError> {
+        // Create module key for circular import detection
+        let module_key = path.join("::");
+
+        // Check for circular imports
+        if self.imported_modules.contains_key(&module_key) {
+            return Ok(()); // Already imported, skip
+        }
+
+        let file_path = self.resolve_module_path(path, symbol).ok_or_else(|| {
+            let full_path = if let Some(sym) = symbol {
+                format!("{}::{}", path.join("::"), sym)
+            } else {
+                path.join("::")
+            };
+            SemanticError::ModuleNotFound(full_path)
+        })?;
+
+        let code = fs::read_to_string(&file_path)
+            .map_err(|_| SemanticError::ModuleNotFound(file_path.display().to_string()))?;
+
+        // Mark this module as being imported
+        self.imported_modules.insert(module_key, true);
+
+        let tokens = crate::lexar::lexer::lex(&code);
+        let mut parser = crate::parser::Parser::new(&tokens);
+        let ast = parser
+            .parse_program()
+            .map_err(|_| SemanticError::ParseError)?;
+
+        // Recursively analyze the imported AST
+        if let crate::parser::ast::AstNode::Program(mut nodes) = ast {
+            // Create a temporary analyzer to collect public functions from the imported module
+            let mut imported_analyzer = SemanticAnalyzer::new();
+            for node in &mut nodes {
+                imported_analyzer.analyze_node(node)?;
+            }
+            // Merge public functions from imported module into global function table
+            for (name, (params, ret)) in imported_analyzer.function_table.iter() {
+                if name.chars().next().unwrap_or('a').is_uppercase() {
+                    self.function_table
+                        .insert(name.clone(), (params.clone(), ret.clone()));
+                }
+            }
+            // If a specific symbol was requested, verify it exists
+            if let Some(sym) = symbol {
+                // Check if the symbol exists in function_table or symbol_table
+                if !self.function_table.contains_key(sym) && !self.symbol_table.contains_key(sym) {
+                    return Err(SemanticError::UndeclaredFunction(NamedError {
+                        name: sym.clone(),
+                    }));
+                }
+            }
+        }
+        Ok(())
     }
 }

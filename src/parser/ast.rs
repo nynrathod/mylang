@@ -110,4 +110,10 @@ pub enum AstNode {
         end: Box<AstNode>,
         inclusive: bool,
     },
+
+    // --- Module Import ---
+    Import {
+        path: Vec<String>,      // e.g. ["models", "user"]
+        symbol: Option<String>, // e.g. Some("User") or None for wildcard
+    },
 }

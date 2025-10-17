@@ -87,6 +87,9 @@ impl<'a> Parser<'a> {
                 TokenType::Struct => self.parse_struct_decl(),
                 TokenType::Enum => self.parse_enum_decl(),
 
+                // Import statement
+                TokenType::Import => self.parse_import(),
+
                 // Statements
                 TokenType::If => self.parse_conditional_stmt(),
                 TokenType::For => self.parse_for_stmt(),
@@ -144,6 +147,37 @@ impl<'a> Parser<'a> {
             statements.push(stmt);
         }
         Ok(AstNode::Program(statements))
+    }
+
+    /// Parses an import statement.
+    /// Syntax: import models::User::Createuser;
+    /// Path will be ["models", "User"], symbol will be Some("Createuser")
+    pub fn parse_import(&mut self) -> ParseResult<AstNode> {
+        self.expect(TokenType::Import)?;
+        // Parse all identifiers separated by ::
+        let mut all_parts = Vec::new();
+
+        // Parse first identifier
+        let first = self.expect(TokenType::Identifier)?;
+        all_parts.push(first.value.to_string());
+
+        // Parse :: separated path
+        while self.peek_is(TokenType::Colon) {
+            self.advance(); // :
+            self.expect(TokenType::Colon)?; // second :
+            let next = self.expect(TokenType::Identifier)?;
+            all_parts.push(next.value.to_string());
+        }
+
+        self.expect(TokenType::Semi)?;
+
+        // Split into path and symbol
+        // Last element is the symbol (function/type name)
+        // Everything before is the module path (file path)
+        let symbol = all_parts.pop(); // Remove and return last element
+        let path = all_parts; // Remaining elements are the path
+
+        Ok(AstNode::Import { path, symbol })
     }
 
     /// Parses a comma-separated list of items until an end token is reached.
