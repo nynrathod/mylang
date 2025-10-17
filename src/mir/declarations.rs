@@ -224,28 +224,8 @@ pub fn build_function_decl(builder: &mut MirBuilder, node: &AstNode) {
             builder.program.functions.last().map(|f| f.blocks.len()).unwrap_or(0)
         );
 
-        // Set entry block terminator BEFORE inserting it
-        if has_loop_blocks {
-            // There are loop blocks - entry MUST jump to the first loop block
-            if let Some(func) = builder.program.functions.last() {
-                let first_loop_label = func.blocks.first().map(|b| b.label.clone());
-
-                if let Some(target) = first_loop_label {
-                    eprintln!(
-                        "[FIX] Function '{}': Setting entry block '{}' to jump to first loop '{}'",
-                        name, entry_label, target
-                    );
-                    block.terminator = Some(MirInstr::Jump {
-                        target: target.clone(),
-                    });
-                } else {
-                    eprintln!(
-                        "[ERROR] Function '{}': has_loop_blocks=true but no blocks found!",
-                        name
-                    );
-                }
-            }
-        } else {
+        // Don't set entry terminator yet for loops - we'll do it after insertion
+        if !has_loop_blocks {
             // No loops - entry is the only block
             // Add return only if function has no explicit return type
             if return_type.is_none() && block.terminator.is_none() {
@@ -267,12 +247,88 @@ pub fn build_function_decl(builder: &mut MirBuilder, node: &AstNode) {
                     name,
                     func.blocks.len()
                 );
+
+                // NOW find the init block and make entry jump to it
+                // Init block should have stores to loop variables (i, i_end, etc.)
+                if has_loop_blocks && func.blocks.len() > 1 {
+                    // Find the first block that has Store instructions (the init block)
+                    let mut init_label = None;
+                    for b in func.blocks.iter().skip(1) {
+                        // Init block has assigns/stores but no loads or comparisons
+                        let has_stores = b
+                            .instrs
+                            .iter()
+                            .any(|instr| matches!(instr, MirInstr::Assign { .. }));
+                        let has_ops = b
+                            .instrs
+                            .iter()
+                            .any(|instr| matches!(instr, MirInstr::BinaryOp(..)));
+                        if has_stores && !has_ops {
+                            init_label = Some(b.label.clone());
+                            break;
+                        }
+                    }
+
+                    if let Some(target) = init_label {
+                        eprintln!(
+                            "[FIX] Function '{}': Setting entry block '{}' to jump to init block '{}'",
+                            name, entry_label, target
+                        );
+                        func.blocks[0].terminator = Some(MirInstr::Jump { target });
+                    } else {
+                        // Fallback: jump to first block after entry
+                        let first_block = func.blocks[1].label.clone();
+                        eprintln!(
+                            "[FIX] Function '{}': No init found, jumping to first block '{}'",
+                            name, first_block
+                        );
+                        func.blocks[0].terminator = Some(MirInstr::Jump {
+                            target: first_block,
+                        });
+                    }
+                }
             }
         } else {
             eprintln!(
                 "[DEBUG] Function '{}': Final block already pushed, not inserting at position 0",
                 name
             );
+
+            // Still need to set entry block jump for loops even if it was already pushed
+            if has_loop_blocks {
+                if let Some(func) = builder.program.functions.last_mut() {
+                    // Find init block (has stores but no binary ops)
+                    let mut init_label = None;
+                    for b in func.blocks.iter() {
+                        let has_stores = b
+                            .instrs
+                            .iter()
+                            .any(|instr| matches!(instr, MirInstr::Assign { .. }));
+                        let has_ops = b
+                            .instrs
+                            .iter()
+                            .any(|instr| matches!(instr, MirInstr::BinaryOp(..)));
+                        if has_stores && !has_ops {
+                            init_label = Some(b.label.clone());
+                            break;
+                        }
+                    }
+
+                    if let Some(target) = init_label {
+                        eprintln!(
+                            "[FIX] Function '{}': Setting already-pushed entry '{}' to jump to init '{}'",
+                            name, entry_label, target
+                        );
+                        // Find the entry block and set its terminator
+                        for b in func.blocks.iter_mut() {
+                            if b.label == entry_label {
+                                b.terminator = Some(MirInstr::Jump { target });
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // NOW get cleanup instructions from exit_scope

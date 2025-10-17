@@ -74,7 +74,7 @@ fn process_statement_in_dev_mode(
 }
 
 fn main() {
-    let input = fs::read_to_string("./test_cases.mylang").unwrap();
+    let input = fs::read_to_string("./test_cases.md").unwrap();
     let tokens = lex(&input);
 
     const DEV_MODE: bool = false;
@@ -115,10 +115,10 @@ fn main() {
                             println!("\nSemantic analysis passed");
 
                             if PRINT_AST {
-                                // println!(
-                                //     "AST after semantic analysis:\n{:#?}",
-                                //     AstNode::Program(nodes.clone())
-                                // );
+                                println!(
+                                    "AST after semantic analysis:\n{:#?}",
+                                    AstNode::Program(nodes.clone())
+                                );
                             }
 
                             // ===== INTEGRATE MIR =====
@@ -126,21 +126,7 @@ fn main() {
                             mir_builder.build_program(nodes);
                             mir_builder.finalize();
 
-                            let mir_program = &mir_builder.program;
-
-                            // println!("=== MIR DUMP ===");
-                            // for (fi, func) in mir_program.functions.iter().enumerate() {
-                            //     println!("Function {}: {}", fi, func.name);
-                            //     for (bi, block) in func.blocks.iter().enumerate() {
-                            //         println!("  Block {}:", bi);
-                            //         for (ii, instr) in block.instrs.iter().enumerate() {
-                            //             println!("    {}: {:?}", ii, instr);
-                            //         }
-                            //     }
-                            // }
-                            // println!("=== END MIR ===");
-
-                            // println!("\nGenerated SSA MIR:\n{:#?}", mir_builder.program);
+                            println!("\nGenerated SSA MIR:\n{:#?}", mir_builder.program);
                             // println!("\nGenerated SSA MIR:\n{}", mir_builder.program);
 
                             // ===== INTEGRATE CODEGEN =====
@@ -151,7 +137,7 @@ fn main() {
                             println!("Generated LLVM IR:");
                             codegen.dump(); // This prints to stderr
 
-                            // Also save to file
+                            // // Also save to file
                             let llvm_ir = codegen.module.print_to_string();
                             std::fs::write("output.ll", llvm_ir.to_string()).unwrap();
                             println!("LLVM IR written to output.ll");
