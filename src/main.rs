@@ -74,7 +74,8 @@ fn process_statement_in_dev_mode(
 }
 
 fn main() {
-    let input = fs::read_to_string("./test_cases.md").unwrap();
+    let input = fs::read_to_string("./myproject/main.my").unwrap();
+    // let input = fs::read_to_string("./test_cases.md").unwrap();
     let tokens = lex(&input);
 
     const DEV_MODE: bool = false;
@@ -114,16 +115,21 @@ fn main() {
                         Ok(_) => {
                             println!("\nSemantic analysis passed");
 
+                            // Inject imported functions into the AST for MIR generation
+                            // This ensures imported functions get compiled into the final binary
+                            let mut all_nodes = analyzer.imported_functions.clone();
+                            all_nodes.extend(nodes.clone());
+
                             if PRINT_AST {
                                 println!(
-                                    "AST after semantic analysis:\n{:#?}",
-                                    AstNode::Program(nodes.clone())
+                                    "AST after semantic analysis (with imports):\n{:#?}",
+                                    AstNode::Program(all_nodes.clone())
                                 );
                             }
 
                             // ===== INTEGRATE MIR =====
                             let mut mir_builder = MirBuilder::new();
-                            mir_builder.build_program(nodes);
+                            mir_builder.build_program(&all_nodes);
                             mir_builder.finalize();
 
                             println!("\nGenerated SSA MIR:\n{:#?}", mir_builder.program);

@@ -19,6 +19,12 @@ impl<'ctx> CodeGen<'ctx> {
         // Store the global instructions for later use (e.g., initialization).
         self.globals = program.globals.clone();
 
+        // Pre-scan and declare all functions for forward references
+        // This allows functions to call each other regardless of definition order
+        for func in &program.functions {
+            self.predeclare_function(func);
+        }
+
         // --- PRE-PROCESSING ---
         // Scan all global instructions to identify strings involved in concatenation.
         // This helps optimize string handling and memory management.
@@ -47,6 +53,58 @@ impl<'ctx> CodeGen<'ctx> {
         // Ensures the final executable has a standard `main` function if the source didn't define one.
         if self.module.get_function("main").is_none() {
             self.generate_default_main();
+        }
+    }
+
+    // ADD THIS NEW METHOD:
+    fn predeclare_function(&mut self, func: &MirFunction) {
+        if self.declared_functions.contains(&func.name) {
+            return;
+        }
+
+        // Build parameter types
+        let param_types: Vec<BasicMetadataTypeEnum> = func
+            .param_types
+            .iter()
+            .map(|type_opt| self.map_type_to_llvm(type_opt))
+            .collect();
+
+        // Determine return type
+        let fn_type = if let Some(ref ret_type_str) = func.return_type {
+            if ret_type_str.contains("Void") {
+                self.context.void_type().fn_type(&param_types, false)
+            } else if ret_type_str.contains("String") || ret_type_str.contains("Str") {
+                self.context
+                    .ptr_type(AddressSpace::default())
+                    .fn_type(&param_types, false)
+            } else if ret_type_str.contains("Array") || ret_type_str.contains("Map") {
+                self.context
+                    .ptr_type(AddressSpace::default())
+                    .fn_type(&param_types, false)
+            } else {
+                self.context.i32_type().fn_type(&param_types, false)
+            }
+        } else {
+            self.context.void_type().fn_type(&param_types, false)
+        };
+
+        // Declare function
+        self.module.add_function(&func.name, fn_type, None);
+        self.declared_functions.insert(func.name.clone());
+    }
+
+    // ADD THIS HELPER:
+    fn map_type_to_llvm(&self, type_opt: &Option<String>) -> BasicMetadataTypeEnum<'ctx> {
+        if let Some(type_str) = type_opt {
+            if type_str.contains("String") || type_str.contains("Str") {
+                self.context.ptr_type(AddressSpace::default()).into()
+            } else if type_str.contains("Array") || type_str.contains("Map") {
+                self.context.ptr_type(AddressSpace::default()).into()
+            } else {
+                self.context.i32_type().into()
+            }
+        } else {
+            self.context.i32_type().into()
         }
     }
 
@@ -161,7 +219,22 @@ impl<'ctx> CodeGen<'ctx> {
         } else {
             self.context.void_type().fn_type(&param_types, false)
         };
-        let llvm_func = self.module.add_function(&func.name, fn_type, None);
+        
+        // Check if function was already declared (for forward references/imports)
+        let llvm_func = if let Some(existing_func) = self.module.get_function(&func.name) {
+            // Verify signature matches
+            if existing_func.get_type() == fn_type {
+                existing_func
+            } else {
+                eprintln!("Warning: Function {} signature mismatch between declaration and definition", func.name);
+                eprintln!("  Declared: {:?}", existing_func.get_type());
+                eprintln!("  Expected: {:?}", fn_type);
+                // Create new function with correct signature
+                self.module.add_function(&func.name, fn_type, None)
+            }
+        } else {
+            self.module.add_function(&func.name, fn_type, None)
+        };
 
         // Create all necessary basic blocks within the function (e.g., entry, if.then, loop.body).
         let mut bb_map = HashMap::new();

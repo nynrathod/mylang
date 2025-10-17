@@ -123,6 +123,14 @@ impl MirBuilder {
                     build_function_decl(self, node);
                 }
 
+                // Import statement - skip in MIR (already handled by analyzer)
+                // The analyzer has already loaded imported functions into the function table
+                // and will process them when analyzing the importing module
+                AstNode::Import { .. } => {
+                    // No MIR generation needed - imports are resolved at analysis time
+                    continue;
+                }
+
                 // Handle struct declarations (type definitions, not instances).
                 AstNode::StructDecl { name, fields } => {
                     // For demonstration, create a placeholder instance showing the structure.

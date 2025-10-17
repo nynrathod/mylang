@@ -96,6 +96,9 @@ pub struct CodeGen<'ctx> {
     pub arrayget_sources: HashMap<String, String>, // Maps ArrayGet result names to their source array names
     pub current_function_params: Vec<(String, Option<String>)>, // Track current function parameters (name, type) for RC on return
     pub function_return_types: HashMap<String, String>, // Track function return types for proper RC handling on call results
+
+    pub declared_functions: std::collections::HashSet<String>,
+    pub external_modules: HashMap<String, Vec<String>>,
 }
 
 impl<'ctx> CodeGen<'ctx> {
@@ -132,6 +135,9 @@ impl<'ctx> CodeGen<'ctx> {
             arrayget_sources: HashMap::new(),
             current_function_params: Vec::new(),
             function_return_types: HashMap::new(),
+
+            declared_functions: std::collections::HashSet::new(),
+            external_modules: HashMap::new(),
         }
     }
 

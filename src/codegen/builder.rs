@@ -495,8 +495,23 @@ impl<'ctx> CodeGen<'ctx> {
 
             // ===== EXISTING INSTRUCTIONS =====
             MirInstr::BinaryOp(op, dst, lhs, rhs) => {
-                let lhs_val = self.resolve_value(lhs).into_int_value();
-                let rhs_val = self.resolve_value(rhs).into_int_value();
+                // Check if this is a string concatenation (add operation with pointer operands)
+                let lhs_val = self.resolve_value(lhs);
+                let rhs_val = self.resolve_value(rhs);
+                
+                // If both are pointers and operation is "add", treat as string concatenation
+                if op == "add" && lhs_val.is_pointer_value() && rhs_val.is_pointer_value() {
+                    // Delegate to string concatenation logic
+                    return self.generate_instr(&MirInstr::StringConcat {
+                        name: dst.clone(),
+                        left: lhs.clone(),
+                        right: rhs.clone(),
+                    });
+                }
+                
+                // Otherwise, treat as integer operations
+                let lhs_val = lhs_val.into_int_value();
+                let rhs_val = rhs_val.into_int_value();
 
                 let res = match op.as_str() {
                     "add" => self

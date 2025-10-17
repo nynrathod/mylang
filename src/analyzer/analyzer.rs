@@ -20,6 +20,7 @@ pub struct SemanticAnalyzer {
     pub(crate) outer_symbol_table: Option<HashMap<String, SymbolInfo>>, // For nested scopes
     pub(crate) project_root: PathBuf, // Root directory for module resolution
     pub(crate) imported_modules: HashMap<String, bool>, // Track imported modules to prevent circular imports
+    pub imported_functions: Vec<AstNode>, // Store imported function AST nodes for MIR generation
 }
 
 impl SemanticAnalyzer {
@@ -37,6 +38,7 @@ impl SemanticAnalyzer {
             outer_symbol_table: None,
             project_root,
             imported_modules: HashMap::new(),
+            imported_functions: Vec::new(),
         }
     }
 
@@ -203,13 +205,32 @@ impl SemanticAnalyzer {
             for node in &mut nodes {
                 imported_analyzer.analyze_node(node)?;
             }
+            
             // Merge public functions from imported module into global function table
-            for (name, (params, ret)) in imported_analyzer.function_table.iter() {
-                if name.chars().next().unwrap_or('a').is_uppercase() {
-                    self.function_table
-                        .insert(name.clone(), (params.clone(), ret.clone()));
+            // AND store the function AST nodes for MIR generation
+            for node in nodes {
+                if let AstNode::FunctionDecl { name, .. } = &node {
+                    // Only import functions that start with uppercase (public convention)
+                    if name.chars().next().unwrap_or('a').is_uppercase() {
+                        // If a specific symbol was requested, only import that symbol
+                        if let Some(sym) = symbol {
+                            if name == sym {
+                                self.imported_functions.push(node.clone());
+                                if let Some((params, ret)) = imported_analyzer.function_table.get(name) {
+                                    self.function_table.insert(name.clone(), (params.clone(), ret.clone()));
+                                }
+                            }
+                        } else {
+                            // No specific symbol - import all public functions
+                            self.imported_functions.push(node.clone());
+                            if let Some((params, ret)) = imported_analyzer.function_table.get(name) {
+                                self.function_table.insert(name.clone(), (params.clone(), ret.clone()));
+                            }
+                        }
+                    }
                 }
             }
+            
             // If a specific symbol was requested, verify it exists
             if let Some(sym) = symbol {
                 // Check if the symbol exists in function_table or symbol_table
