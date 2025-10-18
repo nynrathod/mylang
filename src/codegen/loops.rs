@@ -6,7 +6,7 @@
 //! - Infinite loops: for { }
 //! - Break and continue statements with proper cleanup
 
-use crate::codegen::CodeGen;
+use crate::codegen::core::CodeGen;
 use crate::mir::mir::MirInstr;
 use inkwell::basic_block::BasicBlock;
 use inkwell::IntPredicate;

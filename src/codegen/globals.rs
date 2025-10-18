@@ -1,4 +1,4 @@
-use crate::codegen::{CodeGen, Symbol};
+use crate::codegen::core::{CodeGen, Symbol};
 use crate::mir::mir::MirInstr;
 use inkwell::types::BasicTypeEnum;
 use inkwell::types::{AsTypeRef, BasicType};

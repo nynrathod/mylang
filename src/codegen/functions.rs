@@ -1,4 +1,4 @@
-use crate::codegen::CodeGen;
+use crate::codegen::core::CodeGen;
 use crate::mir::mir::{CodegenBlock, MirBlock, MirFunction, MirInstr, MirProgram, MirTerminator};
 use inkwell::types::BasicMetadataTypeEnum;
 use inkwell::types::StructType;
@@ -219,14 +219,17 @@ impl<'ctx> CodeGen<'ctx> {
         } else {
             self.context.void_type().fn_type(&param_types, false)
         };
-        
+
         // Check if function was already declared (for forward references/imports)
         let llvm_func = if let Some(existing_func) = self.module.get_function(&func.name) {
             // Verify signature matches
             if existing_func.get_type() == fn_type {
                 existing_func
             } else {
-                eprintln!("Warning: Function {} signature mismatch between declaration and definition", func.name);
+                eprintln!(
+                    "Warning: Function {} signature mismatch between declaration and definition",
+                    func.name
+                );
                 eprintln!("  Declared: {:?}", existing_func.get_type());
                 eprintln!("  Expected: {:?}", fn_type);
                 // Create new function with correct signature
