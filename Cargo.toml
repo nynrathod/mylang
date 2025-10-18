@@ -2,9 +2,12 @@
 name = "mylang"
 version = "0.1.0"
 edition = "2021"
-incremental = true
 
 [dependencies]
 inkwell = { version = "0.6.0", features = ["llvm18-1"] }
 llvm-sys = "=181.2.0"
 # clap = "4.5.47"
+
+
+[profile.dev]
+incremental = true
