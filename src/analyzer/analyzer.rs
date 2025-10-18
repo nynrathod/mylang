@@ -25,10 +25,8 @@ pub struct SemanticAnalyzer {
 
 impl SemanticAnalyzer {
     /// Create a new semantic analyzer with empty symbol/function tables.
-    pub fn new() -> Self {
-        // Set project root to X:\Projects\mylang\myproject
-        // Use environment variable or current working directory
-        let project_root = std::env::current_dir().unwrap().join("myproject");
+    pub fn new(project_root: Option<PathBuf>) -> Self {
+        let project_root = project_root.unwrap_or_else(|| std::env::current_dir().unwrap());
 
         println!("[DEBUG] Project root set to: {:?}", project_root);
 
@@ -56,20 +54,25 @@ impl SemanticAnalyzer {
                     self.import_module(path, symbol)?;
                 }
                 // Register local function signatures
-                AstNode::FunctionDecl { name, params, return_type, .. } => {
+                AstNode::FunctionDecl {
+                    name,
+                    params,
+                    return_type,
+                    ..
+                } => {
                     // Check if function already defined
                     if self.function_table.contains_key(name) {
                         return Err(SemanticError::FunctionRedeclaration(NamedError {
                             name: name.to_string(),
                         }));
                     }
-                    
+
                     // Collect parameter types
                     let param_types: Vec<TypeNode> = params
                         .iter()
                         .map(|(_, t)| t.clone().unwrap_or(TypeNode::Int))
                         .collect();
-                    
+
                     // Register function signature (all functions, not just public ones)
                     self.function_table.insert(
                         name.to_string(),
@@ -79,7 +82,7 @@ impl SemanticAnalyzer {
                 _ => {} // Skip other nodes in first pass
             }
         }
-        
+
         // SECOND PASS: Analyze all nodes (including function bodies)
         // Skip imports as they're already processed
         for node in nodes {
@@ -207,7 +210,7 @@ impl SemanticAnalyzer {
     ) -> Result<(), SemanticError> {
         // Create module key for circular import detection
         let module_key = path.join("::");
-        
+
         // If importing a specific symbol, check if that symbol is already imported
         if let Some(sym) = symbol {
             if self.function_table.contains_key(sym) {
@@ -238,10 +241,10 @@ impl SemanticAnalyzer {
             let ast = parser
                 .parse_program()
                 .map_err(|_| SemanticError::ParseError)?;
-            
+
             if let crate::parser::ast::AstNode::Program(nodes) = ast {
                 // Create a temporary analyzer and analyze (will be fast since already done)
-                let mut imported_analyzer = SemanticAnalyzer::new();
+                let mut imported_analyzer = SemanticAnalyzer::new(None);
                 let mut nodes_mut = nodes.clone();
                 imported_analyzer.analyze_program(&mut nodes_mut)?;
                 (nodes, imported_analyzer)
@@ -265,7 +268,7 @@ impl SemanticAnalyzer {
             // Recursively analyze the imported AST
             if let crate::parser::ast::AstNode::Program(mut nodes) = ast {
                 // Create a temporary analyzer to collect public functions from the imported module
-                let mut imported_analyzer = SemanticAnalyzer::new();
+                let mut imported_analyzer = SemanticAnalyzer::new(None);
                 // Use analyze_program for proper two-pass analysis
                 imported_analyzer.analyze_program(&mut nodes)?;
                 (nodes, imported_analyzer)
@@ -294,8 +297,10 @@ impl SemanticAnalyzer {
                                 self.imported_functions.push(node.clone());
                             }
                             // Copy function signature to current function table
-                            if let Some((params, ret)) = imported_analyzer.function_table.get(name) {
-                                self.function_table.insert(name.clone(), (params.clone(), ret.clone()));
+                            if let Some((params, ret)) = imported_analyzer.function_table.get(name)
+                            {
+                                self.function_table
+                                    .insert(name.clone(), (params.clone(), ret.clone()));
                             }
                         }
                     } else {
@@ -310,13 +315,14 @@ impl SemanticAnalyzer {
                             self.imported_functions.push(node.clone());
                         }
                         if let Some((params, ret)) = imported_analyzer.function_table.get(name) {
-                            self.function_table.insert(name.clone(), (params.clone(), ret.clone()));
+                            self.function_table
+                                .insert(name.clone(), (params.clone(), ret.clone()));
                         }
                     }
                 }
             }
         }
-        
+
         // If a specific symbol was requested, verify it exists
         if let Some(sym) = symbol {
             // Check if the symbol exists in function_table or symbol_table

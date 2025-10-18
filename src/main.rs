@@ -11,8 +11,9 @@ use parser::Parser;
 use std::fs;
 
 use crate::lexar::token::{Token, TokenType};
-use codegen::CodeGen;
+use codegen::core::CodeGen;
 use mir::builder::MirBuilder;
+use std::path::PathBuf;
 
 fn skip_to_next_statement(parser: &mut Parser) {
     while parser.current < parser.tokens.len() {
@@ -74,15 +75,19 @@ fn process_statement_in_dev_mode(
 }
 
 fn main() {
-    let input = fs::read_to_string("./myproject/main.my").unwrap();
-    // let input = fs::read_to_string("./test_cases.md").unwrap();
-    let tokens = lex(&input);
-
     const DEV_MODE: bool = false;
     const PRINT_AST: bool = true;
 
+    let input_path = "./examples/myproject/main.my";
+    let input_path = "./test_cases.md";
+    let input = fs::read_to_string(input_path).unwrap();
+
+    let project_root = PathBuf::from(input_path).parent().unwrap().to_path_buf();
+
+    let tokens = lex(&input);
     let mut parser = Parser::new(&tokens);
-    let mut analyzer = SemanticAnalyzer::new();
+    let mut analyzer = SemanticAnalyzer::new(Some(project_root));
+
     let mut error_count = 0;
     let mut statements = Vec::new();
 
