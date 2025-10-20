@@ -68,8 +68,9 @@ fn process_statement_in_dev_mode(
 }
 
 fn main() {
-    const DEV_MODE: bool = false;
-    const PRINT_AST: bool = true;
+    // Use Rust's built-in debug/release detection for mode
+    const DEV_MODE: bool = cfg!(debug_assertions);
+    const PRINT_AST: bool = DEV_MODE; // Only print AST in dev mode
 
     // let input_path = "./examples/myproject/main.my";
     let input_path = "./test_cases.md";
@@ -85,39 +86,45 @@ fn main() {
     let mut statements = Vec::new();
 
     if DEV_MODE {
-        // DEV mode: process each statement individually
+        // DEV mode: process each statement individually, print everything
         while parser.current < parser.tokens.len() {
             if process_statement_in_dev_mode(&mut parser, &mut analyzer, &mut statements) {
                 error_count += 1;
             }
         }
 
-        // Print full AST at the end
         if PRINT_AST {
             let program_ast = AstNode::Program(statements.clone());
             println!("\nComplete Program AST in DEV_MODE:");
-            // println!("{:#?}", program_ast);
+            println!("{:#?}", program_ast);
         }
 
         println!("\nDEV_MODE analysis finished with {} errors", error_count);
+
+        // Optionally run MIR/codegen in dev mode for debugging
+        let mut mir_builder = MirBuilder::new();
+        mir_builder.build_program(&statements);
+        mir_builder.finalize();
+        println!("\nGenerated SSA MIR:\n{:#?}", mir_builder.program);
+
+        let context = inkwell::context::Context::create();
+        let mut codegen = CodeGen::new("main_module", &context);
+        codegen.generate_program(&mir_builder.program);
+        println!("Generated LLVM IR:");
+        codegen.dump();
     } else {
-        // PRODUCTION mode: parse full program at once, stop on first failure
+        // PRODUCTION mode: parse full program at once, minimal output
         match parser.parse_program() {
             Ok(mut program_ast) => {
-                // if PRINT_AST {
-                //     println!("AST:\n{:#?}", program_ast);
-                // }
-
                 if let AstNode::Program(ref mut nodes) = program_ast {
                     match analyzer.analyze_program(nodes) {
                         Ok(_) => {
-                            println!("\nSemantic analysis passed");
+                            println!("Semantic analysis passed");
 
-                            // Inject imported functions into the AST for MIR generation
-                            // This ensures imported functions get compiled into the final binary
                             let mut all_nodes = analyzer.imported_functions.clone();
                             all_nodes.extend(nodes.clone());
 
+                            // Only print AST if explicitly enabled
                             if PRINT_AST {
                                 println!(
                                     "AST after semantic analysis (with imports):\n{:#?}",
@@ -125,30 +132,30 @@ fn main() {
                                 );
                             }
 
-                            // ===== INTEGRATE MIR =====
+                            // MIR and Codegen always run in prod, but only print IR in dev
                             let mut mir_builder = MirBuilder::new();
                             mir_builder.build_program(&all_nodes);
                             mir_builder.finalize();
 
-                            println!("\nGenerated SSA MIR:\n{:#?}", mir_builder.program);
-                            // println!("\nGenerated SSA MIR:\n{}", mir_builder.program);
+                            if DEV_MODE {
+                                println!("\nGenerated SSA MIR:\n{:#?}", mir_builder.program);
+                            }
 
-                            // ===== INTEGRATE CODEGEN =====
                             let context = inkwell::context::Context::create();
                             let mut codegen = CodeGen::new("main_module", &context);
                             codegen.generate_program(&mir_builder.program);
 
-                            println!("Generated LLVM IR:");
-                            codegen.dump(); // This prints to stderr
+                            if DEV_MODE {
+                                println!("Generated LLVM IR:");
+                                codegen.dump();
+                            }
 
-                            // // Also save to file
+                            // Always save LLVM IR to file in prod
                             let llvm_ir = codegen.module.print_to_string();
                             std::fs::write("output.ll", llvm_ir.to_string()).unwrap();
-                            println!("LLVM IR written to output.ll");
-                            // =============================
                         }
                         Err(e) => {
-                            println!("\nSemantic analysis failed: {:?}", e);
+                            eprintln!("Semantic analysis failed: {:?}", e);
                             return;
                         }
                     }
