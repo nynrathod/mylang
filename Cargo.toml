@@ -11,3 +11,11 @@ llvm-sys = "=181.2.0"
 
 [profile.dev]
 incremental = true
+
+[lib]
+name = "mylang"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mylang"
+path = "src/main.rs"
