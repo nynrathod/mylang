@@ -5,3 +5,6 @@ pub mod statements;
 pub mod types;
 
 pub use analyzer::SemanticAnalyzer;
+
+#[cfg(test)]
+mod tests;

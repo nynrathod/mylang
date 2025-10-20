@@ -16,3 +16,6 @@ pub mod builder;
 pub mod functions;
 pub mod globals;
 pub mod loops;
+
+#[cfg(test)]
+mod tests;

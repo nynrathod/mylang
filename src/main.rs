@@ -1,24 +1,17 @@
-mod analyzer;
-mod codegen;
-mod lexar;
-mod mir;
-mod parser;
-
-use analyzer::SemanticAnalyzer;
-use lexar::lexer::lex;
-use parser::ast::AstNode;
-use parser::Parser;
+use mylang::analyzer::SemanticAnalyzer;
+use mylang::codegen::core::CodeGen;
+use mylang::lexar::lexer::lex;
+use mylang::lexar::token::{Token, TokenType};
+use mylang::mir::builder::MirBuilder;
+use mylang::parser::ast::AstNode;
+use mylang::parser::Parser;
 use std::fs;
-
-use crate::lexar::token::{Token, TokenType};
-use codegen::core::CodeGen;
-use mir::builder::MirBuilder;
 use std::path::PathBuf;
 
 fn skip_to_next_statement(parser: &mut Parser) {
     while parser.current < parser.tokens.len() {
         if let Some(tok) = parser.peek() {
-            if matches!(tok.kind, crate::lexar::token::TokenType::Semi) {
+            if matches!(tok.kind, TokenType::Semi) {
                 parser.advance();
                 break;
             }
@@ -78,7 +71,7 @@ fn main() {
     const DEV_MODE: bool = false;
     const PRINT_AST: bool = true;
 
-    let input_path = "./examples/myproject/main.my";
+    // let input_path = "./examples/myproject/main.my";
     let input_path = "./test_cases.md";
     let input = fs::read_to_string(input_path).unwrap();
 

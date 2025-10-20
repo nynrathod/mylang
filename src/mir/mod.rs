@@ -5,3 +5,6 @@ pub mod mir;
 pub mod statements;
 
 pub use mir::{MirBlock, MirFunction, MirInstr, MirProgram};
+
+#[cfg(test)]
+mod tests;
