@@ -217,22 +217,11 @@ pub fn build_function_decl(builder: &mut MirBuilder, node: &AstNode) {
             false
         };
 
-        eprintln!(
-            "[DEBUG] Function '{}': After building statements, has_loop_blocks = {}, num_blocks = {}",
-            name,
-            has_loop_blocks,
-            builder.program.functions.last().map(|f| f.blocks.len()).unwrap_or(0)
-        );
-
         // Don't set entry terminator yet for loops - we'll do it after insertion
         if !has_loop_blocks {
             // No loops - entry is the only block
             // Add return only if function has no explicit return type
             if return_type.is_none() && block.terminator.is_none() {
-                eprintln!(
-                    "[DEBUG] Function '{}': No loops, will add return to entry block after cleanup",
-                    name
-                );
                 // Don't add return yet - we'll add cleanup first, then return
             }
         }
@@ -242,11 +231,6 @@ pub fn build_function_decl(builder: &mut MirBuilder, node: &AstNode) {
         if !final_block_pushed {
             if let Some(func) = builder.program.functions.last_mut() {
                 func.blocks.insert(0, block);
-                eprintln!(
-                    "[DEBUG] Function '{}': Inserted entry block, total blocks = {}",
-                    name,
-                    func.blocks.len()
-                );
 
                 // NOW find the init block and make entry jump to it
                 // Init block should have stores to loop variables (i, i_end, etc.)
@@ -289,11 +273,6 @@ pub fn build_function_decl(builder: &mut MirBuilder, node: &AstNode) {
                 }
             }
         } else {
-            eprintln!(
-                "[DEBUG] Function '{}': Final block already pushed, not inserting at position 0",
-                name
-            );
-
             // Still need to set entry block jump for loops even if it was already pushed
             if has_loop_blocks {
                 if let Some(func) = builder.program.functions.last_mut() {
@@ -340,12 +319,6 @@ pub fn build_function_decl(builder: &mut MirBuilder, node: &AstNode) {
         builder.exit_scope(&mut temp_block);
         let decref_instrs = temp_block.instrs;
 
-        eprintln!(
-            "[DEBUG] Function '{}': Generated {} DecRef instructions for cleanup",
-            name,
-            decref_instrs.len()
-        );
-
         // Add cleanup to the appropriate block (ONLY ONCE)
         if has_loop_blocks {
             // Add cleanup and return to ALL blocks without terminators
@@ -359,20 +332,10 @@ pub fn build_function_decl(builder: &mut MirBuilder, node: &AstNode) {
                     .map(|b| b.label.clone())
                     .collect();
 
-                eprintln!(
-                    "[DEBUG] Function '{}': Blocks needing cleanup: {:?}",
-                    name, blocks_needing_cleanup
-                );
-
                 for block_label in blocks_needing_cleanup {
                     if let Some(final_block) =
                         func.blocks.iter_mut().find(|b| b.label == block_label)
                     {
-                        eprintln!(
-                            "[DEBUG] Function '{}': Adding RC cleanup to block '{}'",
-                            name, block_label
-                        );
-
                         // Add decrefs to this block
                         for decref_instr in &decref_instrs {
                             final_block.instrs.push(decref_instr.clone());
@@ -381,15 +344,7 @@ pub fn build_function_decl(builder: &mut MirBuilder, node: &AstNode) {
                         // Only add return if function is void
                         if return_type.is_none() {
                             final_block.terminator = Some(MirInstr::Return { values: vec![] });
-                            eprintln!(
-                                "[DEBUG] Function '{}': Added void return to block '{}'",
-                                name, block_label
-                            );
                         } else {
-                            eprintln!(
-                                "[DEBUG] Function '{}': Block '{}' has no terminator but function returns {:?}, leaving as-is",
-                                name, block_label, return_type.as_ref().unwrap()
-                            );
                         }
                     }
                 }
@@ -398,11 +353,6 @@ pub fn build_function_decl(builder: &mut MirBuilder, node: &AstNode) {
             // No loops - add cleanup to entry block (the only block)
             if let Some(func) = builder.program.functions.last_mut() {
                 if let Some(entry_block) = func.blocks.first_mut() {
-                    eprintln!(
-                        "[DEBUG] Function '{}': Adding RC cleanup to entry block (no loops)",
-                        name
-                    );
-
                     // Add decrefs to entry block
                     for decref_instr in decref_instrs {
                         entry_block.instrs.push(decref_instr);
@@ -411,7 +361,6 @@ pub fn build_function_decl(builder: &mut MirBuilder, node: &AstNode) {
                     // Add return if needed
                     if return_type.is_none() && entry_block.terminator.is_none() {
                         entry_block.terminator = Some(MirInstr::Return { values: vec![] });
-                        eprintln!("[DEBUG] Function '{}': Added return to entry block", name);
                     }
                 }
             }

@@ -161,10 +161,7 @@ impl<'ctx> CodeGen<'ctx> {
                                                 && meta_val.into_pointer_value() == val_ptr
                                             {
                                                 found_metadata = Some(metadata.clone());
-                                                eprintln!(
-                                                    "[DEBUG] Re-assignment: Found metadata via temp_values pointer match: '{}' -> '{}' (length: {})",
-                                                    value, meta_name, metadata.length
-                                                );
+
                                                 break;
                                             }
                                         }
@@ -220,10 +217,6 @@ impl<'ctx> CodeGen<'ctx> {
                                                 element_type: element_type.to_string(),
                                                 contains_strings: element_type == "Str",
                                             });
-                                            eprintln!(
-                                                "[DEBUG] Re-assignment: Extracted array length from usage pattern: '{}' has length {} (inferred)",
-                                                value, max_index + 1
-                                            );
                                         }
                                     }
                                 }
@@ -244,20 +237,11 @@ impl<'ctx> CodeGen<'ctx> {
                                 format!("{}item", base_name),
                             ];
 
-                            eprintln!(
-                                "[DEBUG] Re-assignment: Copying array metadata from '{}' to '{}' (length: {})",
-                                value, name, metadata.length
-                            );
-
                             for variation in name_variations {
                                 self.array_metadata.insert(variation, metadata.clone());
                             }
                         } else {
                             // Try to find metadata by checking if value points to a known array
-                            eprintln!(
-                                "[DEBUG] Re-assignment: No direct metadata for '{}', trying propagate_metadata",
-                                value
-                            );
                             self.propagate_metadata(name, value);
                         }
                     } else if value_is_heap_map {
@@ -323,10 +307,6 @@ impl<'ctx> CodeGen<'ctx> {
                                                 && meta_val.into_pointer_value() == val_ptr
                                             {
                                                 found_metadata = Some(metadata.clone());
-                                                eprintln!(
-                                                    "[DEBUG] Found metadata via temp_values pointer match: '{}' -> '{}' (length: {})",
-                                                    value, meta_name, metadata.length
-                                                );
                                                 break;
                                             }
                                         }
@@ -360,10 +340,6 @@ impl<'ctx> CodeGen<'ctx> {
                                     element_type: element_type.to_string(),
                                     contains_strings: element_type == "Str",
                                 });
-                                eprintln!(
-                                    "[DEBUG] Initial assignment: Inferred array length from temp_values: '{}' has length {} (inferred)",
-                                    value, elem_count
-                                );
                             }
                         }
 
@@ -381,20 +357,11 @@ impl<'ctx> CodeGen<'ctx> {
                                 format!("{}item", base_name),
                             ];
 
-                            eprintln!(
-                                "[DEBUG] Propagating array metadata from '{}' to '{}' (length: {})",
-                                value, name, metadata.length
-                            );
-
                             for variation in name_variations {
                                 self.array_metadata.insert(variation, metadata.clone());
                             }
                         } else {
                             // Try to find metadata by checking if value points to a known array
-                            eprintln!(
-                                "[DEBUG] No direct metadata found for '{}', trying propagate_metadata",
-                                value
-                            );
                             self.propagate_metadata(name, value);
                         }
                     } else if value_is_heap_map {
@@ -877,11 +844,6 @@ impl<'ctx> CodeGen<'ctx> {
 
     /// Propagate array/map metadata from source to destination by checking all possible sources
     pub fn propagate_metadata(&mut self, dest_name: &str, source_name: &str) {
-        eprintln!(
-            "[DEBUG] propagate_metadata: dest='{}', source='{}'",
-            dest_name, source_name
-        );
-
         // Try to propagate array metadata directly
         if let Some(metadata) = self.array_metadata.get(source_name).cloned() {
             // Register under EXTENSIVE variations
@@ -896,11 +858,6 @@ impl<'ctx> CodeGen<'ctx> {
                 format!("{}item_array", dest_base),
                 format!("{}item", dest_base),
             ];
-
-            eprintln!(
-                "[DEBUG] Direct metadata found! Propagating from '{}' to '{}' with variations: {:?} (length: {})",
-                source_name, dest_name, dest_variations, metadata.length
-            );
 
             for variation in dest_variations {
                 self.array_metadata.insert(variation, metadata.clone());
@@ -937,11 +894,6 @@ impl<'ctx> CodeGen<'ctx> {
                     format!("{}item_array", dest_base),
                     format!("{}item", dest_base),
                 ];
-
-                eprintln!(
-                    "[DEBUG] Source variation '{}' found! Propagating to dest variations: {:?} (length: {})",
-                    variation, dest_variations, metadata.length
-                );
 
                 for dest_var in dest_variations {
                     self.array_metadata.insert(dest_var, metadata.clone());
@@ -1000,11 +952,6 @@ impl<'ctx> CodeGen<'ctx> {
                                 format!("{}item_array", dest_base),
                                 format!("{}item", dest_base),
                             ];
-
-                            eprintln!(
-                                "[DEBUG] Pointer equality match! '{}' == '{}', propagating to: {:?} (length: {})",
-                                other_name, source_name, dest_variations, metadata.length
-                            );
 
                             for variation in dest_variations {
                                 self.array_metadata.insert(variation, metadata.clone());
@@ -1069,11 +1016,6 @@ impl<'ctx> CodeGen<'ctx> {
                     format!("{}item_array", dest_base_name),
                     format!("{}item", dest_base_name),
                 ];
-
-                eprintln!(
-                    "[DEBUG] Fuzzy match! '{}' matches patterns, propagating to: {:?} (length: {})",
-                    meta_name, dest_variations, metadata.length
-                );
 
                 for variation in dest_variations {
                     self.array_metadata.insert(variation, metadata.clone());
@@ -1150,11 +1092,6 @@ impl<'ctx> CodeGen<'ctx> {
                             format!("{}item_array", dest_base),
                             format!("{}item", dest_base),
                         ];
-
-                        eprintln!(
-                            "[DEBUG] Symbol pointer match! Propagating to: {:?} (length: {})",
-                            dest_variations, metadata.length
-                        );
 
                         for variation in dest_variations {
                             self.array_metadata.insert(variation, metadata.clone());

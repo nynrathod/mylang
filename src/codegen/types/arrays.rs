@@ -65,13 +65,6 @@ impl<'ctx> CodeGen<'ctx> {
             format!("{}item", base_name),
         ];
 
-        eprintln!(
-            "[DEBUG] Registering array metadata for '{}' with length {} under variations: {:?}",
-            name,
-            elements.len(),
-            name_variations
-        );
-
         for variation in name_variations {
             self.array_metadata.insert(variation, metadata.clone());
         }
@@ -206,14 +199,8 @@ impl<'ctx> CodeGen<'ctx> {
 
     /// Helper implementations for array and map operations with RC
     pub fn get_array_length(&self, array_name: &str) -> inkwell::values::IntValue<'ctx> {
-        eprintln!("[DEBUG] get_array_length called for '{}'", array_name);
-
         // STEP 1: Direct metadata lookup
         if let Some(metadata) = self.array_metadata.get(array_name) {
-            eprintln!(
-                "[DEBUG] Found array length for '{}': {}",
-                array_name, metadata.length
-            );
             return self
                 .context
                 .i32_type()
@@ -229,10 +216,6 @@ impl<'ctx> CodeGen<'ctx> {
 
         for search_name in &search_names {
             if let Some(metadata) = self.array_metadata.get(search_name) {
-                eprintln!(
-                    "[DEBUG] Found array length via variation '{}' -> '{}': {}",
-                    array_name, search_name, metadata.length
-                );
                 return self
                     .context
                     .i32_type()
@@ -251,10 +234,6 @@ impl<'ctx> CodeGen<'ctx> {
                             if other_val.is_pointer_value()
                                 && other_val.into_pointer_value() == ptr_val
                             {
-                                eprintln!(
-                                    "[DEBUG] Found array length via pointer match '{}' -> '{}': {}",
-                                    array_name, other_name, metadata.length
-                                );
                                 return self
                                     .context
                                     .i32_type()
@@ -268,10 +247,6 @@ impl<'ctx> CodeGen<'ctx> {
 
         // STEP 4: CRITICAL - Runtime length extraction from heap header
         // For dynamically created arrays (like innerarr), extract length at runtime
-        eprintln!(
-            "[DEBUG] Attempting runtime length extraction for '{}'",
-            array_name
-        );
 
         if let Some(sym) = self.symbols.get(array_name) {
             if let Ok(loaded) = self.builder.build_load(sym.ty, sym.ptr, "runtime_load") {
@@ -315,14 +290,6 @@ impl<'ctx> CodeGen<'ctx> {
         }
 
         // FINAL FALLBACK: Return 0 to skip loop safely
-        eprintln!(
-            "[ERROR] Could not determine length for '{}', defaulting to 0",
-            array_name
-        );
-        eprintln!(
-            "[DEBUG] Available metadata: {:?}",
-            self.array_metadata.keys().collect::<Vec<_>>()
-        );
         self.context.i32_type().const_int(0, false)
     }
 
