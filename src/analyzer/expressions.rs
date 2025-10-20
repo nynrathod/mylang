@@ -31,27 +31,31 @@ impl SemanticAnalyzer {
                         name, info.ty
                     );
                     Ok(info.ty.clone())
-                } else if let Some(outer) = &self.outer_symbol_table {
-                    if outer.contains_key(name) {
-                        println!(
-                            "[DEBUG] infer_type: '{}' found only in outer scope, returning OutOfScopeVariable error",
-                            name
-                        );
-                        return Err(SemanticError::OutOfScopeVariable(NamedError {
-                            name: name.clone(),
-                        }));
-                    } else {
-                        println!(
-                            "[DEBUG] infer_type: '{}' not found in any scope, returning UndeclaredVariable error",
-                            name
-                        );
-                        return Err(SemanticError::UndeclaredVariable(NamedError {
-                            name: name.clone(),
-                        }));
-                    }
                 } else {
+                    // Walk up the scope stack to find the variable
+                    for scope in self.scope_stack.iter().rev() {
+                        if let Some(info) = scope.get(name) {
+                            println!(
+                                "[DEBUG] infer_type: Found '{}' in parent scope with type {:?}",
+                                name, info.ty
+                            );
+                            return Ok(info.ty.clone());
+                        }
+                    }
+                    // Fallback to outer_symbol_table if present
+                    if let Some(outer) = &self.outer_symbol_table {
+                        if outer.contains_key(name) {
+                            println!(
+                                "[DEBUG] infer_type: '{}' found only in outer scope, returning OutOfScopeVariable error",
+                                name
+                            );
+                            return Err(SemanticError::OutOfScopeVariable(NamedError {
+                                name: name.clone(),
+                            }));
+                        }
+                    }
                     println!(
-                        "[DEBUG] infer_type: '{}' not found in any scope (no outer), returning UndeclaredVariable error",
+                        "[DEBUG] infer_type: '{}' not found in any scope, returning UndeclaredVariable error",
                         name
                     );
                     Err(SemanticError::UndeclaredVariable(NamedError {

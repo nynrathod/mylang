@@ -76,14 +76,20 @@ impl SemanticAnalyzer {
                     match target {
                         // Identifier: add to symbol table, mark mutability.
                         crate::parser::ast::Pattern::Identifier(name) => {
-                            // Prevent redeclaration of variables.
-                            if self.symbol_table.contains_key(name) {
-                                return Err(SemanticError::VariableRedeclaration(NamedError {
-                                    name: name.clone(),
-                                }));
-                            }
                             // Skip wildcards (do not store them).
                             if name != "_" {
+                                // Check for redeclaration in the current scope only
+                                if self.symbol_table.contains_key(name) {
+                                    println!(
+                                        "[DEBUG] Variable redeclaration: variable '{}' already exists in current scope",
+                                        name
+                                    );
+                                    return Err(SemanticError::VariableRedeclaration(NamedError {
+                                        name: name.clone(),
+                                    }));
+                                }
+                                
+                                // Add variable to current scope
                                 self.symbol_table.insert(
                                     name.clone(),
                                     SymbolInfo {

@@ -22,7 +22,7 @@ pub struct SemanticAnalyzer {
     pub(crate) imported_modules: HashMap<String, bool>, // Track imported modules to prevent circular imports
     pub imported_functions: Vec<AstNode>, // Store imported function AST nodes for MIR generation
     pub loop_depth: usize,                // Track loop nesting for break/continue error handling
-    pub scope_stack: Vec<HashMap<String, SymbolInfo>>, // Stack for block scopes
+    pub scope_stack: Vec<HashMap<String, SymbolInfo>>, // Scope stack for block scoping
 }
 
 impl SemanticAnalyzer {
@@ -170,32 +170,14 @@ impl SemanticAnalyzer {
                     "[DEBUG] Entering block, symbol_table before: {:?}",
                     self.symbol_table
                 );
-                let saved_table = self.symbol_table.clone();
+                let parent_scope = self.symbol_table.clone();
+                // Push current scope onto stack and start with a fresh scope for the block
+                self.scope_stack.push(parent_scope.clone());
+                self.symbol_table = HashMap::new();
                 let result = self.analyze_program(nodes);
-                // Restore the symbol table after analyzing the block
-                println!(
-                    "[DEBUG] Exiting block, symbol_table after: {:?}",
-                    self.symbol_table
-                );
-                self.symbol_table = saved_table;
-                println!("[DEBUG] Restored symbol_table to: {:?}", self.symbol_table);
-                // Additional debug: confirm that variables declared in block are not present
-                for node in nodes.iter() {
-                    if let AstNode::LetDecl { pattern, .. } = node {
-                        if let Pattern::Identifier(name) = pattern {
-                            if self.symbol_table.contains_key(name) {
-                                println!(
-                                    "[ERROR] Scope leak: variable '{}' from block is present in outer symbol_table after block analysis!",
-                                    name
-                                );
-                            } else {
-                                println!(
-                                    "[DEBUG] Scope isolation: variable '{}' from block is NOT present in outer symbol_table after block analysis.",
-                                    name
-                                );
-                            }
-                        }
-                    }
+                // Pop scope from stack and restore
+                if let Some(prev_scope) = self.scope_stack.pop() {
+                    self.symbol_table = prev_scope;
                 }
                 result
             }

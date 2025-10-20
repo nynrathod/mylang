@@ -3,6 +3,7 @@ use super::types::{SemanticError, TypeMismatch};
 use crate::analyzer::analyzer::SymbolInfo;
 use crate::analyzer::types::NamedError;
 use crate::parser::ast::{AstNode, Pattern, TypeNode};
+use std::collections::HashMap;
 
 impl SemanticAnalyzer {
     /// Analyze an assignment statement
@@ -263,25 +264,33 @@ impl SemanticAnalyzer {
             }));
         }
 
-        // Save the current symbol table before entering the 'then' block
+        // Create a new scope for the 'then' block
         let saved_table = self.symbol_table.clone();
-        
+        self.scope_stack.push(saved_table);
+        self.symbol_table = HashMap::new();
+
         // Analyze the 'then' block with its own scope
         self.analyze_program(then_block)?;
-        
+
         // Restore the original symbol table to ensure variables from 'then' block don't leak
-        self.symbol_table = saved_table.clone();
+        if let Some(prev_scope) = self.scope_stack.pop() {
+            self.symbol_table = prev_scope;
+        }
 
         // If there is an 'else' branch, analyze it with its own scope as well
         if let Some(else_node) = else_branch {
-            // Save the symbol table again (although it should be the same as saved_table)
+            // Create a new scope for the 'else' branch
             let else_saved_table = self.symbol_table.clone();
-            
+            self.scope_stack.push(else_saved_table);
+            self.symbol_table = HashMap::new();
+
             // Analyze the 'else' branch
             self.analyze_node(else_node)?;
-            
+
             // Restore the symbol table after analyzing the 'else' branch
-            self.symbol_table = else_saved_table;
+            if let Some(prev_scope) = self.scope_stack.pop() {
+                self.symbol_table = prev_scope;
+            }
         }
 
         Ok(())
