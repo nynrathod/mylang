@@ -30,7 +30,6 @@ pub fn lex(input: &str) -> Vec<Token<'_>> {
     keywords.insert("print", TokenType::Print);
 
     // Special values and types
-    keywords.insert("Some", TokenType::Some);
     keywords.insert("true", TokenType::Boolean);
     keywords.insert("false", TokenType::Boolean);
 
@@ -89,7 +88,6 @@ pub fn lex(input: &str) -> Vec<Token<'_>> {
 
     // Miscellaneous symbols
     operators.insert(":", TokenType::Colon);
-    operators.insert("@", TokenType::At);
     operators.insert("#", TokenType::Pound);
     operators.insert("~", TokenType::Tilde);
     operators.insert("?", TokenType::Question);
@@ -108,9 +106,8 @@ pub fn lex(input: &str) -> Vec<Token<'_>> {
             continue;
         }
 
-        // Skip comments starting with // untill new line
+        // Skip comments starting with // until newline
         if c == '/' && i + 1 < chars.len() && chars[i + 1] == '/' {
-            // Skip until newline
             i += 2; // skip the `//`
             while i < chars.len() && chars[i] != '\n' {
                 i += 1;
@@ -143,12 +140,16 @@ pub fn lex(input: &str) -> Vec<Token<'_>> {
             while i < chars.len() && chars[i] != '"' {
                 i += 1;
             }
-            let value: &str = &input[start..i];
-            tokens.push(Token {
-                kind: TokenType::String,
-                value,
-            });
-            i += 1; // skip closing "
+            // Only emit String token if closing quote is found
+            if i < chars.len() && chars[i] == '"' {
+                let value: &str = &input[start..i];
+                tokens.push(Token {
+                    kind: TokenType::String,
+                    value,
+                });
+                i += 1; // skip closing "
+            }
+            // If no closing quote, skip emitting String token
             continue;
         }
 
@@ -172,11 +173,14 @@ pub fn lex(input: &str) -> Vec<Token<'_>> {
             while i < chars.len() && chars[i].is_alphanumeric() {
                 i += 1;
             }
-            let word: &str = &input[start..i];
-            let kind = keywords.get(word).unwrap_or(&TokenType::Identifier);
+            // Use char indices for slicing to support unicode
+            let word: String = chars[start..i].iter().collect();
+            let kind = keywords
+                .get(word.as_str())
+                .unwrap_or(&TokenType::Identifier);
             tokens.push(Token {
                 kind: *kind,
-                value: word,
+                value: &input[start..start + word.len()],
             });
             continue;
         }
@@ -203,7 +207,11 @@ pub fn lex(input: &str) -> Vec<Token<'_>> {
             continue;
         }
 
-        // Unknown character: skip
+        // Unknown character: emit Unknown token
+        tokens.push(Token {
+            kind: TokenType::Unknown,
+            value: &input[i..i + 1],
+        });
         i += 1;
     }
 

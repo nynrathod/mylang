@@ -1,5 +1,6 @@
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TokenType {
+    Unknown, // For invalid or unrecognized characters
     // --- Keywords ---
     Let,      // let
     Mut,      // mutable keyword for let
@@ -14,7 +15,6 @@ pub enum TokenType {
     Return,   // return
     Break,    // break
     Continue, // continue
-    Some,     // some
     Print,    // print
 
     // --- Literals ---
@@ -75,7 +75,6 @@ pub enum TokenType {
     RangeInc,     // ..
     RangeExc,     // ..=
     Colon,        // :
-    At,           // @
     Pound,        // #
     Tilde,        // ~
     Question,     // ?
