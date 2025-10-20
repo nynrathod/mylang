@@ -182,6 +182,13 @@ impl<'a> Parser<'a> {
         // - `x, y, z` → tuple pattern
         let patterns = self.parse_comma_separated(|p| p.parse_pattern(), TokenType::Eq)?;
 
+        // Error if no variable name is provided (e.g., `let = 42;`)
+        if patterns.is_empty() {
+            return Err(ParseError::UnexpectedToken(
+                "Missing variable name in let declaration".into(),
+            ));
+        }
+
         // If only one pattern, return it directly; otherwise, return a tuple pattern
         if patterns.len() == 1 {
             Ok(patterns.into_iter().next().unwrap())

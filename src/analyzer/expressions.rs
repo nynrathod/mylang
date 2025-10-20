@@ -21,24 +21,39 @@ impl SemanticAnalyzer {
 
             // Identifier (variable name): look up in symbol table
             AstNode::Identifier(name) => {
+                println!(
+                    "[DEBUG] infer_type: Looking up identifier '{}' in symbol_table: {:?}, outer_symbol_table: {:?}",
+                    name, self.symbol_table, self.outer_symbol_table
+                );
                 if let Some(info) = self.symbol_table.get(name) {
-                    // Found in current scope then return its type
+                    println!(
+                        "[DEBUG] infer_type: Found '{}' in current scope with type {:?}",
+                        name, info.ty
+                    );
                     Ok(info.ty.clone())
                 } else if let Some(outer) = &self.outer_symbol_table {
-                    // If variable is defined in an outer scope but not accessible here
                     if outer.contains_key(name) {
+                        println!(
+                            "[DEBUG] infer_type: '{}' found only in outer scope, returning OutOfScopeVariable error",
+                            name
+                        );
                         return Err(SemanticError::OutOfScopeVariable(NamedError {
                             name: name.clone(),
                         }));
-                    }
-                    // If not found in any scope, variable is undeclared
-                    else {
+                    } else {
+                        println!(
+                            "[DEBUG] infer_type: '{}' not found in any scope, returning UndeclaredVariable error",
+                            name
+                        );
                         return Err(SemanticError::UndeclaredVariable(NamedError {
                             name: name.clone(),
                         }));
                     }
                 } else {
-                    // No outer scope, variable is undeclared
+                    println!(
+                        "[DEBUG] infer_type: '{}' not found in any scope (no outer), returning UndeclaredVariable error",
+                        name
+                    );
                     Err(SemanticError::UndeclaredVariable(NamedError {
                         name: name.clone(),
                     }))

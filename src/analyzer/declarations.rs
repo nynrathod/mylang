@@ -25,10 +25,17 @@ impl SemanticAnalyzer {
                 value,
                 is_ref_counted,
             } => {
-                // Determine the type of the RHS (value being assigned)
-                let rhs_type = if let Some(annotated_type) = type_annotation.as_ref() {
-                    // If a type annotation exists, check that the RHS matches it.
-                    let rhs_type = self.infer_type(value)?;
+                // Use infer_rhs_types to ensure function call argument checks are performed
+                let rhs_types_vec = self.infer_rhs_types(value, 1)?;
+                let rhs_type = rhs_types_vec.get(0).cloned().ok_or_else(|| {
+                    SemanticError::VarTypeMismatch(TypeMismatch {
+                        expected: type_annotation.clone().unwrap_or(TypeNode::Int),
+                        found: TypeNode::Void,
+                        value: Some(value.clone()),
+                    })
+                })?;
+
+                if let Some(annotated_type) = type_annotation.as_ref() {
                     if rhs_type != *annotated_type {
                         return Err(SemanticError::VarTypeMismatch(TypeMismatch {
                             expected: annotated_type.clone(),
@@ -36,11 +43,7 @@ impl SemanticAnalyzer {
                             value: Some(value.clone()),
                         }));
                     }
-                    annotated_type.clone()
-                } else {
-                    // No annotation: infer type from the value.
-                    self.infer_type(value)?
-                };
+                }
 
                 // Update the type annotation to reflect the inferred type if it was missing.
                 *type_annotation = Some(rhs_type.clone());

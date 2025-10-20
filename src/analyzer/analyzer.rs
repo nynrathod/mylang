@@ -21,6 +21,8 @@ pub struct SemanticAnalyzer {
     pub(crate) project_root: PathBuf, // Root directory for module resolution
     pub(crate) imported_modules: HashMap<String, bool>, // Track imported modules to prevent circular imports
     pub imported_functions: Vec<AstNode>, // Store imported function AST nodes for MIR generation
+    pub loop_depth: usize,                // Track loop nesting for break/continue error handling
+    pub scope_stack: Vec<HashMap<String, SymbolInfo>>, // Stack for block scopes
 }
 
 impl SemanticAnalyzer {
@@ -37,6 +39,8 @@ impl SemanticAnalyzer {
             project_root,
             imported_modules: HashMap::new(),
             imported_functions: Vec::new(),
+            loop_depth: 0,
+            scope_stack: Vec::new(),
         }
     }
 
@@ -132,7 +136,24 @@ impl SemanticAnalyzer {
                 Ok(())
             }
             AstNode::Print { .. } => self.analyze_print(node),
-            AstNode::Break | AstNode::Continue => Ok(()),
+            AstNode::Break => {
+                // Error if not inside a loop
+                if self.loop_depth == 0 {
+                    return Err(SemanticError::UnexpectedNode {
+                        expected: "break inside loop".to_string(),
+                    });
+                }
+                Ok(())
+            }
+            AstNode::Continue => {
+                // Error if not inside a loop
+                if self.loop_depth == 0 {
+                    return Err(SemanticError::UnexpectedNode {
+                        expected: "continue inside loop".to_string(),
+                    });
+                }
+                Ok(())
+            }
             AstNode::ConditionalStmt {
                 condition,
                 then_block,
@@ -143,7 +164,41 @@ impl SemanticAnalyzer {
                 iterable,
                 body,
             } => self.analyze_for_stmt(pattern, iterable.as_deref_mut(), body),
-            AstNode::Block(nodes) => self.analyze_program(nodes),
+            AstNode::Block(nodes) => {
+                // Save the current symbol table (scope)
+                println!(
+                    "[DEBUG] Entering block, symbol_table before: {:?}",
+                    self.symbol_table
+                );
+                let saved_table = self.symbol_table.clone();
+                let result = self.analyze_program(nodes);
+                // Restore the symbol table after analyzing the block
+                println!(
+                    "[DEBUG] Exiting block, symbol_table after: {:?}",
+                    self.symbol_table
+                );
+                self.symbol_table = saved_table;
+                println!("[DEBUG] Restored symbol_table to: {:?}", self.symbol_table);
+                // Additional debug: confirm that variables declared in block are not present
+                for node in nodes.iter() {
+                    if let AstNode::LetDecl { pattern, .. } = node {
+                        if let Pattern::Identifier(name) = pattern {
+                            if self.symbol_table.contains_key(name) {
+                                println!(
+                                    "[ERROR] Scope leak: variable '{}' from block is present in outer symbol_table after block analysis!",
+                                    name
+                                );
+                            } else {
+                                println!(
+                                    "[DEBUG] Scope isolation: variable '{}' from block is NOT present in outer symbol_table after block analysis.",
+                                    name
+                                );
+                            }
+                        }
+                    }
+                }
+                result
+            }
 
             // Catch-all for any AST nodes not explicitly handled above.
             // We call `infer_type` to:
@@ -151,11 +206,56 @@ impl SemanticAnalyzer {
             // Ensure expressions (literals, binary/unary ops, function calls) are type-correct.
             // Future-proof: new AST node types will still be semantically validated.
             _ => {
-                self.infer_type(node)?;
-                Ok(())
+                // Add function call argument count/type checking
+                if let AstNode::FunctionCall { func, args } = node {
+                    // Try to extract function name from Identifier node
+                    let func_name = if let AstNode::Identifier(name) = &**func {
+                        name
+                    } else {
+                        return Err(SemanticError::InvalidFunctionCall {
+                            func: format!("{:?}", func),
+                        });
+                    };
+
+                    let (param_types, _return_type) =
+                        self.function_table.get(func_name).ok_or_else(|| {
+                            SemanticError::UndeclaredFunction(NamedError {
+                                name: func_name.clone(),
+                            })
+                        })?;
+
+                    // Check argument count
+                    if args.len() != param_types.len() {
+                        return Err(SemanticError::FunctionArgumentMismatch {
+                            name: func_name.clone(),
+                            expected: param_types.len(),
+                            found: args.len(),
+                        });
+                    }
+
+                    // Check argument types
+                    for (arg, expected_type) in args.iter().zip(param_types.iter()) {
+                        let arg_type = self.infer_type(arg)?;
+                        if arg_type != *expected_type {
+                            return Err(SemanticError::FunctionArgumentTypeMismatch {
+                                name: func_name.clone(),
+                                expected: expected_type.clone(),
+                                found: arg_type,
+                            });
+                        }
+                    }
+
+                    // Return type is not used here, but could be returned if needed
+                    Ok(())
+                } else {
+                    self.infer_type(node)?;
+                    Ok(())
+                }
             }
         }
     }
+
+    // Helper to check if currently inside a loop (for break/continue validation)
 
     /// Resolve a module path (e.g., ["http", "Client"]) to a file path
     /// For import http::Client::Fetchuser, we want http/Client.my

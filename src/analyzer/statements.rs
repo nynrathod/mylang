@@ -29,7 +29,20 @@ impl SemanticAnalyzer {
             });
         }
 
-        // Add variables into the symbol table with their inferred types
+        // Check mutability for each assignment target
+        for (target, _) in targets.iter().zip(rhs_types.iter()) {
+            if let Pattern::Identifier(name) = target {
+                if let Some(info) = self.symbol_table.get(name) {
+                    if !info.mutable {
+                        return Err(SemanticError::InvalidAssignmentTarget {
+                            target: format!("Cannot assign to immutable variable '{}'", name),
+                        });
+                    }
+                }
+            }
+        }
+
+        // Add variables into the symbol table with their inferred types (for new declarations)
         self.bind_targets(&targets, &rhs_types);
 
         Ok(())
@@ -98,7 +111,7 @@ impl SemanticAnalyzer {
     /// - Functions can return single or multiple values.
     /// - Tuples spread into multiple values.
     /// - Simple expressions just return one type.
-    fn infer_rhs_types(
+    pub fn infer_rhs_types(
         &self,
         value: &AstNode,
         lhs_count: usize,
@@ -232,6 +245,7 @@ impl SemanticAnalyzer {
     /// Analyze a conditional statement (if/else).
     /// - Ensures the condition expression evaluates to a boolean type.
     /// - Returns an error if the condition is not a boolean.
+    /// - Creates a new scope for the then and else blocks to ensure proper scope isolation.
     pub fn analyze_conditional_stmt(
         &mut self,
         condition: &mut AstNode,
@@ -249,12 +263,25 @@ impl SemanticAnalyzer {
             }));
         }
 
-        // Analyze the 'then' block.
+        // Save the current symbol table before entering the 'then' block
+        let saved_table = self.symbol_table.clone();
+        
+        // Analyze the 'then' block with its own scope
         self.analyze_program(then_block)?;
+        
+        // Restore the original symbol table to ensure variables from 'then' block don't leak
+        self.symbol_table = saved_table.clone();
 
-        // If there is an 'else' branch, analyze it as well.
+        // If there is an 'else' branch, analyze it with its own scope as well
         if let Some(else_node) = else_branch {
+            // Save the symbol table again (although it should be the same as saved_table)
+            let else_saved_table = self.symbol_table.clone();
+            
+            // Analyze the 'else' branch
             self.analyze_node(else_node)?;
+            
+            // Restore the symbol table after analyzing the 'else' branch
+            self.symbol_table = else_saved_table;
         }
 
         Ok(())
@@ -353,8 +380,12 @@ impl SemanticAnalyzer {
             }
         }
 
+        // Increment loop depth before analyzing the loop body
+        self.loop_depth += 1;
         // Analyze the loop body for semantic correctness.
         self.analyze_program(body)?;
+        // Decrement loop depth after analyzing the loop body
+        self.loop_depth -= 1;
         // Restore the outer symbol table after the loop.
         self.symbol_table = outer_table;
         Ok(())
