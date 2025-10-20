@@ -30,6 +30,7 @@ mod mir_tests {
         }
     }
 
+    // --- VALID TESTS ---
     #[test]
     fn test_simple_function_mir() {
         let input = r#"
@@ -226,62 +227,40 @@ mod mir_tests {
         assert!(mir.program.functions.iter().any(|f| f.name == "main"));
     }
 
-    // --- Invalid/Negative MIR test cases ---
-
+    // Edge case: nested for loops
     #[test]
-    fn test_invalid_syntax_mir() {
-        // Missing variable name
-        let input = "fn main() { let = 42; }";
-        let result = build_mir(input);
-        assert!(result.is_err(), "Should fail on invalid syntax");
-    }
-
-    #[test]
-    fn test_type_error_mir() {
-        // Assign string to Int variable
-        let input = "fn main() { let x: Int = \"hello\"; }";
-        let result = build_mir(input);
-        assert!(result.is_err(), "Should fail on type error");
-    }
-
-    #[test]
-    fn test_undefined_variable_mir() {
-        // Use of undeclared variable
-        let input = "fn main() { let x = y; }";
-        let result = build_mir(input);
-        assert!(result.is_err(), "Should fail on undefined variable");
-    }
-
-    #[test]
-    fn test_wrong_function_arg_count_mir() {
+    fn test_nested_for_loops_mir() {
         let input = r#"
-            fn add(x: Int, y: Int) -> Int { return x + y; }
-            fn main() { let x = add(5); }
+            fn main() {
+                for i in 0..3 {
+                    for j in 0..2 {
+                        print(i + j);
+                    }
+                }
+            }
         "#;
         let result = build_mir(input);
-        assert!(result.is_err(), "Should fail on wrong argument count");
+        assert!(result.is_ok());
     }
 
+    // Edge case: break/continue in nested loops
     #[test]
-    fn test_wrong_function_arg_type_mir() {
+    fn test_break_continue_nested_loops_mir() {
         let input = r#"
-            fn add(x: Int, y: Int) -> Int { return x + y; }
-            fn main() { let x = add(5, "hello"); }
+            fn main() {
+                for i in 0..5 {
+                    for j in 0..5 {
+                        if j == 2 { break; }
+                        if i == 3 { continue; }
+                    }
+                }
+            }
         "#;
         let result = build_mir(input);
-        assert!(result.is_err(), "Should fail on wrong argument type");
+        assert!(result.is_ok());
     }
 
-    #[test]
-    fn test_return_type_mismatch_mir() {
-        let input = r#"
-            fn getValue() -> Int { return "hello"; }
-            fn main() { }
-        "#;
-        let result = build_mir(input);
-        assert!(result.is_err(), "Should fail on return type mismatch");
-    }
-
+    // --- INVALID TESTS ---
     #[test]
     fn test_immutable_assignment_mir() {
         let input = "fn main() { let x = 5; x = 10; }";

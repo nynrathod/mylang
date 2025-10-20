@@ -88,9 +88,9 @@ mod codegen_tests {
         #[test]
         fn test_wrong_function_arg_count_codegen() {
             let input = r#"
-                fn add(x: Int, y: Int) -> Int { return x + y; }
-                fn main() { let x = add(5); }
-            "#;
+            fn add(x: Int, y: Int) -> Int { return x + y; }
+            fn main() { let x = add(5); }
+        "#;
             let result = compile_code(input);
             assert!(result.is_err(), "Should fail on wrong argument count");
         }
@@ -98,9 +98,9 @@ mod codegen_tests {
         #[test]
         fn test_wrong_function_arg_type_codegen() {
             let input = r#"
-                fn add(x: Int, y: Int) -> Int { return x + y; }
-                fn main() { let x = add(5, \"hello\"); }
-            "#;
+            fn add(x: Int, y: Int) -> Int { return x + y; }
+            fn main() { let x = add(5, "hello"); }
+        "#;
             let result = compile_code(input);
             assert!(result.is_err(), "Should fail on wrong argument type");
         }
@@ -108,9 +108,9 @@ mod codegen_tests {
         #[test]
         fn test_return_type_mismatch_codegen() {
             let input = r#"
-                fn getValue() -> Int { return "hello"; }
-                fn main() { }
-            "#;
+            fn getValue() -> Int { return "hello"; }
+            fn main() { }
+        "#;
             let result = compile_code(input);
             assert!(result.is_err(), "Should fail on return type mismatch");
         }
@@ -131,39 +131,39 @@ mod codegen_tests {
             let result = compile_code(input);
             assert!(result.is_err(), "Should fail if condition is not bool");
         }
-    }
 
-    #[test]
-    fn test_if_statement_codegen() {
-        let input = r#"fn main() { if true { let x = 1; } }"#;
-        let result = compile_code(input);
-        assert!(result.is_ok());
-        let ir = result.unwrap();
-        assert!(ir.contains("br"));
-    }
+        #[test]
+        fn test_if_statement_codegen() {
+            let input = r#"fn main() { if true { let x = 1; } }"#;
+            let result = compile_code(input);
+            assert!(result.is_ok());
+            let ir = result.unwrap();
+            assert!(ir.contains("br"));
+        }
 
-    #[test]
-    fn test_for_loop_codegen() {
-        let input = r#"fn main() { for i in 0..5 { print(i); } }"#;
-        let result = compile_code(input);
-        assert!(result.is_ok());
-    }
+        #[test]
+        fn test_for_loop_codegen() {
+            let input = r#"fn main() { for i in 0..5 { print(i); } }"#;
+            let result = compile_code(input);
+            assert!(result.is_ok());
+        }
 
-    #[test]
-    fn test_function_call_codegen() {
-        let input = r#"fn getValue() -> Int { return 42; } fn main() { let x = getValue(); }"#;
-        let result = compile_code(input);
-        assert!(result.is_ok());
-        let ir = result.unwrap();
-        assert!(ir.contains("call"));
-    }
+        #[test]
+        fn test_function_call_codegen() {
+            let input = r#"fn getValue() -> Int { return 42; } fn main() { let x = getValue(); }"#;
+            let result = compile_code(input);
+            assert!(result.is_ok());
+            let ir = result.unwrap();
+            assert!(ir.contains("call"));
+        }
 
-    #[test]
-    fn test_comparison_codegen() {
-        let input = r#"fn main() { let b = 5 > 3; }"#;
-        let result = compile_code(input);
-        assert!(result.is_ok());
-        let ir = result.unwrap();
-        assert!(ir.contains("icmp"));
+        #[test]
+        fn test_comparison_codegen() {
+            let input = r#"fn main() { let b = 5 > 3; }"#;
+            let result = compile_code(input);
+            assert!(result.is_ok());
+            let ir = result.unwrap();
+            assert!(ir.contains("icmp"));
+        }
     }
 }

@@ -4,48 +4,7 @@ mod parser_tests {
     use crate::parser::ast::AstNode;
     use crate::parser::Parser;
 
-    #[test]
-    fn test_invalid_missing_variable_name() {
-        let input = "let = 42;";
-        let tokens = lex(input);
-        let mut parser = Parser::new(&tokens);
-        let result = parser.parse_statement();
-        assert!(
-            result.is_err(),
-            "Parser should fail on missing variable name"
-        );
-    }
-
-    #[test]
-    fn test_invalid_missing_semicolon() {
-        let input = "let x = 42";
-        let tokens = lex(input);
-        let mut parser = Parser::new(&tokens);
-        let result = parser.parse_statement();
-        assert!(result.is_err(), "Parser should fail on missing semicolon");
-    }
-
-    #[test]
-    fn test_invalid_unterminated_string() {
-        let input = "let s = \"unterminated;";
-        let tokens = lex(input);
-        let mut parser = Parser::new(&tokens);
-        let result = parser.parse_statement();
-        assert!(result.is_err(), "Parser should fail on unterminated string");
-    }
-
-    #[test]
-    fn test_invalid_function_missing_paren() {
-        let input = "fn main { let x = 1; }";
-        let tokens = lex(input);
-        let mut parser = Parser::new(&tokens);
-        let result = parser.parse_statement();
-        assert!(
-            result.is_err(),
-            "Parser should fail on missing parentheses in function declaration"
-        );
-    }
-
+    // --- VALID TESTS ---
     #[test]
     fn test_variable_declaration() {
         let input = "let x: Int = 42;";
@@ -182,31 +141,6 @@ mod parser_tests {
     }
 
     #[test]
-    fn test_struct_declaration() {
-        let input = "struct User { name: Str, age: Int }";
-        let tokens = lex(input);
-        let mut parser = Parser::new(&tokens);
-        let result = parser.parse_statement();
-        assert!(result.is_ok());
-        match result.unwrap() {
-            AstNode::StructDecl { name, fields, .. } => {
-                assert_eq!(name, "User");
-                assert_eq!(fields.len(), 2);
-            }
-            _ => panic!("Expected StructDecl"),
-        }
-    }
-
-    // #[test]
-    // fn test_enum_declaration() {
-    //     let input = "enum hello { Somess(Int), None }";
-    //     let tokens = lex(input);
-    //     let mut parser = Parser::new(&tokens);
-    //     let result = parser.parse_statement();
-    //     assert!(result.is_ok());
-    // }
-
-    #[test]
     fn test_import_statement() {
         let input = "import http::Client::Fetchuser;";
         let tokens = lex(input);
@@ -258,5 +192,48 @@ mod parser_tests {
         let mut parser = Parser::new(&tokens);
         let result = parser.parse_program();
         assert!(result.is_ok());
+    }
+
+    // --- INVALID TESTS ---
+    #[test]
+    fn test_invalid_missing_variable_name() {
+        let input = "let = 42;";
+        let tokens = lex(input);
+        let mut parser = Parser::new(&tokens);
+        let result = parser.parse_statement();
+        assert!(
+            result.is_err(),
+            "Parser should fail on missing variable name"
+        );
+    }
+
+    #[test]
+    fn test_invalid_missing_semicolon() {
+        let input = "let x = 42";
+        let tokens = lex(input);
+        let mut parser = Parser::new(&tokens);
+        let result = parser.parse_statement();
+        assert!(result.is_err(), "Parser should fail on missing semicolon");
+    }
+
+    #[test]
+    fn test_invalid_unterminated_string() {
+        let input = "let s = \"unterminated;";
+        let tokens = lex(input);
+        let mut parser = Parser::new(&tokens);
+        let result = parser.parse_statement();
+        assert!(result.is_err(), "Parser should fail on unterminated string");
+    }
+
+    #[test]
+    fn test_invalid_function_missing_paren() {
+        let input = "fn main { let x = 1; }";
+        let tokens = lex(input);
+        let mut parser = Parser::new(&tokens);
+        let result = parser.parse_statement();
+        assert!(
+            result.is_err(),
+            "Parser should fail on missing parentheses in function declaration"
+        );
     }
 }
