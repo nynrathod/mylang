@@ -1,18 +1,36 @@
 use crate::lexar::token::{Token, TokenType};
 use crate::parser::ast::AstNode;
+use std::fmt;
 
 /// Error type for parser.
 /// Used to signal parsing failures, such as unexpected tokens or premature end of input.
 #[allow(dead_code)]
 #[derive(Debug)]
 pub enum ParseError {
-    UnexpectedToken(String), // Used if a token doesn't match grammar expectation.
-    EndOfInput,              // Used if input ends unexpectedly.
+    UnexpectedToken(String), // Legacy: without position
+    UnexpectedTokenAt {
+        msg: String,
+        line: usize,
+        col: usize,
+    },
+    EndOfInput, // Used if input ends unexpectedly.
 }
 
 /// Standard result type for parsing.
 /// Wraps either a successful parse result or a ParseError.
 pub type ParseResult<T> = Result<T, ParseError>;
+
+impl fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ParseError::UnexpectedToken(msg) => write!(f, "parse error: {}", msg),
+            ParseError::UnexpectedTokenAt { msg, line, col } => {
+                write!(f, "parse error at {}:{}: {}", line, col, msg)
+            }
+            ParseError::EndOfInput => write!(f, "parse error: unexpected end of input"),
+        }
+    }
+}
 
 /// The Parser struct is the stateful engine. It consumes tokens (from lexar)
 /// and builds AST nodes (for analyzer, codegen, etc).
@@ -64,13 +82,11 @@ impl<'a> Parser<'a> {
     pub(crate) fn expect(&mut self, kind: TokenType) -> ParseResult<&Token<'a>> {
         match self.advance() {
             Some(tok) if tok.kind == kind => Ok(tok),
-            Some(tok) => {
-                println!("Token identifier: {:?}", tok);
-                Err(ParseError::UnexpectedToken(format!(
-                    "Expected {:?}, got {:?} ({:?})",
-                    kind, tok.kind, tok.value
-                )))
-            }
+            Some(tok) => Err(ParseError::UnexpectedTokenAt {
+                msg: format!("Expected {:?}, got {:?} ({:?})", kind, tok.kind, tok.value),
+                line: tok.line,
+                col: tok.col,
+            }),
             None => Err(ParseError::EndOfInput),
         }
     }
@@ -129,10 +145,11 @@ impl<'a> Parser<'a> {
                 }
 
                 // If the token doesn't match any known statement start, return an error.
-                _ => Err(ParseError::UnexpectedToken(format!(
-                    "Unexpected token: {:?}",
-                    tok.kind
-                ))),
+                _ => Err(ParseError::UnexpectedTokenAt {
+                    msg: format!("Unexpected token: {:?}", tok.kind),
+                    line: tok.line,
+                    col: tok.col,
+                }),
             },
             None => Err(ParseError::EndOfInput),
         }

@@ -86,4 +86,6 @@ pub enum TokenType {
 pub struct Token<'a> {
     pub kind: TokenType,
     pub value: &'a str,
+    pub line: usize,
+    pub col: usize,
 }

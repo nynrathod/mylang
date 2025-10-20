@@ -106,10 +106,7 @@ impl<'a> Parser<'a> {
                 }
                 TokenType::OpenBracket => self.parse_array_literal(),
                 TokenType::OpenBrace => self.parse_map_literal(),
-                _ => Err(ParseError::UnexpectedToken(format!(
-                    "Expected primary expression, got {:?}",
-                    tok.kind
-                ))),
+                _ => Err(ParseError::UnexpectedTokenAt { msg: format!("Expected primary expression, got {:?}", tok.kind), line: tok.line, col: tok.col }),
             }
         } else {
             Err(ParseError::EndOfInput)

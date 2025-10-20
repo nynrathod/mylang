@@ -97,11 +97,19 @@ pub fn lex(input: &str) -> Vec<Token<'_>> {
     operators.insert("_", TokenType::Underscore);
 
     let mut i = 0;
+    let mut line: usize = 1;
+    let mut col: usize = 1;
     while i < chars.len() {
         let c = chars[i];
 
         // Skip whitespace
         if c.is_whitespace() {
+            if c == '\n' {
+                line += 1;
+                col = 1;
+            } else {
+                col += 1;
+            }
             i += 1;
             continue;
         }
@@ -109,8 +117,10 @@ pub fn lex(input: &str) -> Vec<Token<'_>> {
         // Skip comments starting with // until newline
         if c == '/' && i + 1 < chars.len() && chars[i + 1] == '/' {
             i += 2; // skip the `//`
+            col += 2;
             while i < chars.len() && chars[i] != '\n' {
                 i += 1;
+                col += 1;
             }
             continue;
         }
@@ -120,25 +130,35 @@ pub fn lex(input: &str) -> Vec<Token<'_>> {
             tokens.push(Token {
                 kind: TokenType::RangeInc, // inclusive
                 value: "..=",
+                line,
+                col,
             });
             i += 3;
+            col += 3;
             continue;
         } else if i + 2 <= chars.len() && &input[i..i + 2] == ".." {
             tokens.push(Token {
                 kind: TokenType::RangeExc, // exclusive
                 value: "..",
+                line,
+                col,
             });
             i += 2;
+            col += 2;
             continue;
         }
 
         // For value inside string literal
         // Ex: "hello world"
         if c == '"' {
+            let token_line = line;
+            let token_col = col;
             let start = i + 1; // skip opening "
             i += 1;
+            col += 1;
             while i < chars.len() && chars[i] != '"' {
                 i += 1;
+                col += 1;
             }
             // Only emit String token if closing quote is found
             if i < chars.len() && chars[i] == '"' {
@@ -146,8 +166,11 @@ pub fn lex(input: &str) -> Vec<Token<'_>> {
                 tokens.push(Token {
                     kind: TokenType::String,
                     value,
+                    line: token_line,
+                    col: token_col,
                 });
                 i += 1; // skip closing "
+                col += 1;
             }
             // If no closing quote, skip emitting String token
             continue;
@@ -155,23 +178,31 @@ pub fn lex(input: &str) -> Vec<Token<'_>> {
 
         // Numbers (Not supporting float value)
         if c.is_digit(10) {
+            let token_line = line;
+            let token_col = col;
             let start = i;
             while i < chars.len() && chars[i].is_digit(10) {
                 i += 1;
+                col += 1;
             }
             let value: &str = &input[start..i];
             tokens.push(Token {
                 kind: TokenType::Number,
                 value,
+                line: token_line,
+                col: token_col,
             });
             continue;
         }
 
         // Alphabetic: keywords or identifiers
         if c.is_alphabetic() {
+            let token_line = line;
+            let token_col = col;
             let start = i;
             while i < chars.len() && chars[i].is_alphanumeric() {
                 i += 1;
+                col += 1;
             }
             // Use char indices for slicing to support unicode
             let word: String = chars[start..i].iter().collect();
@@ -181,11 +212,15 @@ pub fn lex(input: &str) -> Vec<Token<'_>> {
             tokens.push(Token {
                 kind: *kind,
                 value: &input[start..start + word.len()],
+                line: token_line,
+                col: token_col,
             });
             continue;
         }
 
         // Operators (single or multi-character)
+        let token_line = line;
+        let token_col = col;
         let start = i;
         let mut matched = false;
         for len in (1..=3).rev() {
@@ -196,8 +231,11 @@ pub fn lex(input: &str) -> Vec<Token<'_>> {
                     tokens.push(Token {
                         kind: *kind,
                         value: op,
+                        line: token_line,
+                        col: token_col,
                     });
                     i += len;
+                    col += len;
                     matched = true;
                     break;
                 }
@@ -211,8 +249,11 @@ pub fn lex(input: &str) -> Vec<Token<'_>> {
         tokens.push(Token {
             kind: TokenType::Unknown,
             value: &input[i..i + 1],
+            line,
+            col,
         });
         i += 1;
+        col += 1;
     }
 
     return tokens;

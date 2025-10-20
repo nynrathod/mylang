@@ -80,15 +80,11 @@ impl SemanticAnalyzer {
                             if name != "_" {
                                 // Check for redeclaration in the current scope only
                                 if self.symbol_table.contains_key(name) {
-                                    println!(
-                                        "[DEBUG] Variable redeclaration: variable '{}' already exists in current scope",
-                                        name
-                                    );
                                     return Err(SemanticError::VariableRedeclaration(NamedError {
                                         name: name.clone(),
                                     }));
                                 }
-                                
+
                                 // Add variable to current scope
                                 self.symbol_table.insert(
                                     name.clone(),

@@ -9,7 +9,11 @@ impl<'a> Parser<'a> {
         // Consume the 'let' keyword
         let first_tok = self.advance().ok_or(ParseError::EndOfInput)?;
         if first_tok.kind != TokenType::Let {
-            return Err(ParseError::UnexpectedToken("Expected 'let'".into()));
+            return Err(ParseError::UnexpectedTokenAt {
+                msg: "Expected 'let'".into(),
+                line: first_tok.line,
+                col: first_tok.col,
+            });
         }
 
         // Check for optional 'mut' keyword (mutable variable)
@@ -184,9 +188,17 @@ impl<'a> Parser<'a> {
 
         // Error if no variable name is provided (e.g., `let = 42;`)
         if patterns.is_empty() {
-            return Err(ParseError::UnexpectedToken(
-                "Missing variable name in let declaration".into(),
-            ));
+            if let Some(tok) = self.peek() {
+                return Err(ParseError::UnexpectedTokenAt {
+                    msg: "Missing variable name in let declaration".into(),
+                    line: tok.line,
+                    col: tok.col,
+                });
+            } else {
+                return Err(ParseError::UnexpectedToken(
+                    "Missing variable name in let declaration".into(),
+                ));
+            }
         }
 
         // If only one pattern, return it directly; otherwise, return a tuple pattern
