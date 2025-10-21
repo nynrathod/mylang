@@ -8,11 +8,11 @@ use std::process::{exit, Command};
 /// wow CLI - User-facing command-line interface for the mylang language
 ///
 /// This CLI provides a simple interface for building, running, and
-/// checking mylang language projects. It is designed to be easy for
-/// end users, hiding intermediate files unless requested.
+/// checking mylang language projects. All commands work only in the
+/// current directory where main.my is located.
 ///
 /// Commands:
-///   - `wow build`: Compiles the project to a native binary.
+///   - `wow build`: Compiles the project to a native binary (always optimized).
 ///   - `wow run`: Compiles and immediately runs the project.
 ///   - `wow check`: Checks for errors without compiling to a binary.
 ///
@@ -24,6 +24,20 @@ use std::process::{exit, Command};
 #[command(name = "wow")]
 #[command(about = "mylang cli")]
 #[command(version)]
+#[command(long_about = "===============================================================\n\
+    wow CLI - User-facing command-line interface for the mylang language\n\
+    \n\
+    This CLI provides a simple interface for building, running, and\n\
+    checking mylang language projects. All commands work only in the\n\
+    current directory where main.my is located.\n\
+    \n\
+    Commands:\n\
+      - `wow build`: Compiles the project to a native binary (always optimized).\n\
+      - `wow run`: Compiles and immediately runs the project.\n\
+      - `wow check`: Checks for errors without compiling to a binary.\n\
+    \n\
+    ===============================================================\n\
+    The main CLI struct. Handles parsing of subcommands and arguments.")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -35,16 +49,12 @@ struct Cli {
 enum Commands {
     /// Build the project to a native binary.
     /// By default, outputs to `output` (or `output.exe` on Windows).
+    /// Works only in the current directory.
+    /// Always uses release optimizations for best performance.
     Build {
-        /// Path to the project directory or main.my file.
-        #[arg(default_value = ".")]
-        path: PathBuf,
         /// Name of the output binary.
         #[arg(short, long, default_value = "output")]
         output: String,
-        /// Enable release optimizations.
-        #[arg(short, long)]
-        release: bool,
         /// Keep the generated LLVM IR (.ll) file for debugging.
         #[arg(long)]
         keep_ll: bool,
@@ -80,24 +90,28 @@ fn main() {
         // Build Command
         // =========================
         Commands::Build {
-            path,
             output,
-            release,
             keep_ll,
         } => {
             // Set up compilation options for building.
             let opts = CompileOptions {
-                input_path: path,
+                input_path: PathBuf::from("."),
                 output_name: output,
                 dev_mode: false,
                 keep_ll,
-                release_mode: release,
                 ..Default::default()
             };
 
             // Compile the project and print result.
             match compile_project(opts) {
-                Ok(_) => println!("✓ Build successful"),
+                Ok(result) => {
+                    if result.error_count > 0 {
+                        eprintln!("Build failed with {} errors", result.error_count);
+                        exit(1);
+                    } else {
+                        println!("✓ Build successful");
+                    }
+                }
                 Err(e) => {
                     eprintln!("{}", e);
                     exit(1);
@@ -124,9 +138,17 @@ fn main() {
             };
 
             // Compile the project.
-            if let Err(e) = compile_project(opts) {
-                eprintln!("{}", e);
-                exit(1);
+            match compile_project(opts) {
+                Ok(result) => {
+                    if result.error_count > 0 {
+                        eprintln!("Compilation failed with {} errors", result.error_count);
+                        exit(1);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("{}", e);
+                    exit(1);
+                }
             }
 
             // Determine the executable name based on platform.
@@ -167,7 +189,14 @@ fn main() {
 
             // Run the check and print result.
             match compile_project(opts) {
-                Ok(_) => println!("✓ No errors found"),
+                Ok(result) => {
+                    if result.error_count > 0 {
+                        println!("Found {} errors", result.error_count);
+                        exit(1);
+                    } else {
+                        println!("✓ No errors found");
+                    }
+                }
                 Err(e) => {
                     eprintln!("{}", e);
                     exit(1);

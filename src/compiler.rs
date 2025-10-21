@@ -3,6 +3,7 @@
 // to a native executable using the system linker (clang/gcc/lld-link).
 // No clang or Rust is needed for end users to run the final binary.
 
+use crate::analyzer::types::SemanticError;
 use crate::analyzer::SemanticAnalyzer;
 use crate::codegen::core::CodeGen;
 use crate::diagnostics::{print_grouped, DiagnosticRecord};
@@ -38,8 +39,6 @@ pub struct CompileOptions {
     pub keep_obj: bool,
     /// Only check for errors, do not build
     pub check_only: bool,
-    /// Enable release optimizations
-    pub release_mode: bool,
 }
 
 impl Default for CompileOptions {
@@ -54,7 +53,6 @@ impl Default for CompileOptions {
             keep_ll: false,
             keep_obj: false,
             check_only: false,
-            release_mode: false,
         }
     }
 }
@@ -97,7 +95,7 @@ pub fn compile_project(opts: CompileOptions) -> Result<CompileResult, String> {
     // === 3. Lexing and Parsing ===
     let tokens = lex(&input);
     let mut parser = Parser::new(&tokens);
-    let mut analyzer = SemanticAnalyzer::new(Some(project_root));
+    let mut analyzer = SemanticAnalyzer::new(Some(project_root.clone()));
 
     let mut diagnostics: Vec<DiagnosticRecord> = Vec::new();
     let mut error_count = 0;
@@ -129,6 +127,9 @@ pub fn compile_project(opts: CompileOptions) -> Result<CompileResult, String> {
     }
 
     // === 4. Semantic Analysis ===
+    // Create a fresh analyzer for semantic analysis
+    let mut analyzer = SemanticAnalyzer::new(Some(project_root.clone()));
+
     if let Err(e) = analyzer.analyze_program(&mut statements) {
         use crate::analyzer::types::SemanticError;
         match &e {
@@ -175,6 +176,52 @@ pub fn compile_project(opts: CompileOptions) -> Result<CompileResult, String> {
         }
     }
 
+    // Also check for any additional errors collected by the analyzer
+    for error in &analyzer.collected_errors {
+        match error {
+            SemanticError::ParseErrorInModule {
+                file,
+                error: err_msg,
+            } => {
+                let re = Regex::new(r"at (\d+):(\d+): (.+)").unwrap();
+                let (line, col, msg) = if let Some(caps) = re.captures(err_msg) {
+                    (
+                        caps.get(1).and_then(|m| m.as_str().parse().ok()),
+                        caps.get(2).and_then(|m| m.as_str().parse().ok()),
+                        caps.get(3)
+                            .map(|m| m.as_str().to_string())
+                            .unwrap_or_else(|| err_msg.clone()),
+                    )
+                } else {
+                    (None, None, err_msg.clone())
+                };
+                diagnostics.push(DiagnosticRecord {
+                    filename: file.clone(),
+                    message: msg,
+                    line,
+                    col,
+                    is_parse: true,
+                });
+                if !sources.contains_key(file) {
+                    if let Ok(src) = std::fs::read_to_string(file) {
+                        sources.insert(file.clone(), src);
+                    }
+                }
+                error_count += 1;
+            }
+            _ => {
+                diagnostics.push(DiagnosticRecord {
+                    filename: input_path.display().to_string(),
+                    message: error.to_string(),
+                    line: None,
+                    col: None,
+                    is_parse: false,
+                });
+                error_count += 1;
+            }
+        }
+    }
+
     // Print diagnostics if any errors found
     if !diagnostics.is_empty() {
         // Always include main file source
@@ -204,8 +251,8 @@ pub fn compile_project(opts: CompileOptions) -> Result<CompileResult, String> {
     // Only check mode: skip codegen
     if opts.check_only {
         return Ok(CompileResult {
-            success: true,
-            error_count: 0,
+            success: error_count == 0,  // true if no errors, false if errors found
+            error_count,
         });
     }
 
@@ -267,11 +314,7 @@ fn compile_to_native(codegen: &CodeGen, opts: &CompileOptions) -> Result<(), Str
     let target =
         Target::from_triple(&triple).map_err(|e| format!("Failed to create target: {}", e))?;
 
-    let opt_level = if opts.release_mode {
-        OptimizationLevel::Aggressive
-    } else {
-        OptimizationLevel::None
-    };
+    let opt_level = OptimizationLevel::Aggressive; // Always use aggressive optimizations for end users
 
     let reloc = RelocMode::PIC;
     let model = CodeModel::Default;
