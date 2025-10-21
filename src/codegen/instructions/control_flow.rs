@@ -99,7 +99,39 @@ impl<'ctx> CodeGen<'ctx> {
             } else {
                 let val = self.resolve_value(value);
 
-                if val.is_int_value() {
+                // Special handling for boolean values
+                if self.is_boolean_value(value) {
+                    // Use a simple approach to avoid crashes
+                    let bool_val = self.resolve_value(value);
+                    let int_val = bool_val.into_int_value();
+
+                    // Check if value is 0 (false) or non-zero (true)
+                    let zero = self.context.i32_type().const_int(0, false);
+                    let is_false = self
+                        .builder
+                        .build_int_compare(inkwell::IntPredicate::EQ, int_val, zero, "is_false")
+                        .unwrap();
+
+                    // Use select to choose between "true" and "false" strings
+                    let true_str = if idx < values.len() - 1 { "true " } else { "true" };
+                    let false_str = if idx < values.len() - 1 { "false " } else { "false" };
+
+                    let true_global = self.builder.build_global_string_ptr(true_str, "bool_true").unwrap();
+                    let false_global = self.builder.build_global_string_ptr(false_str, "bool_false").unwrap();
+
+                    // Use select instruction to choose the correct string
+                    let selected_str = self.builder.build_select(
+                        is_false,
+                        false_global.as_pointer_value(),
+                        true_global.as_pointer_value(),
+                        "select_bool_str"
+                    ).unwrap().into_pointer_value();
+
+                    // Print the selected string
+                    self.builder
+                        .build_call(printf_fn, &[selected_str.into()], "print_bool")
+                        .unwrap();
+                } else if val.is_int_value() {
                     let format_str = if idx < values.len() - 1 { "%d " } else { "%d" };
                     let format_global = self
                         .builder
@@ -238,5 +270,36 @@ impl<'ctx> CodeGen<'ctx> {
             self.builder.build_store(sym.ptr, len_val).unwrap();
         }
         Some(len_val.into())
+    }
+
+    /// Check if a variable represents a boolean value (0 or 1)
+    fn is_boolean_value(&self, var_name: &str) -> bool {
+        // Check if this is a comparison operation result (contains comparison keywords)
+        if var_name.contains("equal") || var_name.contains("greater") || var_name.contains("less") {
+            return true;
+        }
+
+        // Check if this is a boolean literal
+        if var_name == "true" || var_name == "false" {
+            return true;
+        }
+
+        // Check if this is a boolean variable in the symbol table with specific naming patterns
+        if let Some(sym) = self.symbols.get(var_name) {
+            if sym.ty.is_int_type() {
+                // Additional check: variable names that suggest boolean usage
+                let name_lower = var_name.to_lowercase();
+                return name_lower.contains("is_") ||
+                       name_lower.contains("has_") ||
+                       name_lower.contains("can_") ||
+                       name_lower.contains("should_") ||
+                       name_lower.contains("valid") ||
+                       name_lower.contains("equal") ||
+                       name_lower.contains("greater") ||
+                       name_lower.contains("less");
+            }
+        }
+
+        false
     }
 }
