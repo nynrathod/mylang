@@ -1,7 +1,11 @@
+/// Centralized diagnostics and error formatting for mylang.
+/// Provides colorized output, error code extraction, and source snippet rendering.
+/// Used for both semantic and parse errors, as well as grouped reporting.
 use crate::analyzer::types::SemanticError;
 use crate::parser::parser::ParseError;
 use std::collections::HashMap;
 
+/// Color helpers for terminal output (ANSI escape codes).
 fn color_red(s: &str) -> String {
     format!("\x1b[31m{}\x1b[0m", s)
 }
@@ -30,6 +34,8 @@ fn color_gray(s: &str) -> String {
     format!("\x1b[90m{}\x1b[0m", s)
 }
 
+/// Renders a source code snippet with a highlighted caret at the error location.
+/// Used for parse errors with line/column info.
 fn render_source_snippet(source: &str, line: usize, col: usize) {
     // 1-based line/column expected
     if line == 0 {
@@ -63,6 +69,8 @@ fn render_source_snippet(source: &str, line: usize, col: usize) {
     }
 }
 
+/// Colorizes diagnostic messages for expected/found errors, unexpected tokens, etc.
+/// Used to improve readability of error output.
 fn colorize_message(msg: &str) -> String {
     if let Some(exp_idx) = msg.find("expected ") {
         if let Some(found_idx) = msg.find(", found ") {
@@ -97,6 +105,8 @@ fn colorize_message(msg: &str) -> String {
     msg.to_string()
 }
 
+/// Colorizes quoted names (e.g., variable or function names in single quotes).
+/// Used for highlighting identifiers in error messages.
 fn colorize_quoted_names(input: &str) -> String {
     let mut out = String::new();
     let mut in_quote = false;
@@ -127,6 +137,8 @@ fn colorize_quoted_names(input: &str) -> String {
     out
 }
 
+/// Extracts an error code from a diagnostic message (e.g., "error[E1234]: ...").
+/// Returns (code, rest of message) if found.
 fn extract_error_code(msg: &str) -> Option<(String, String)> {
     // Try to extract error code from message like "error[E1234]:"
     if let Some(start) = msg.find("error[") {
@@ -139,6 +151,8 @@ fn extract_error_code(msg: &str) -> Option<(String, String)> {
     None
 }
 
+/// Colorizes semantic error messages, including error codes.
+/// Used for semantic analyzer errors.
 fn colorize_semantic_message(msg: &str) -> String {
     if let Some((code, rest)) = extract_error_code(msg) {
         // Only color the error code part in red
@@ -148,6 +162,7 @@ fn colorize_semantic_message(msg: &str) -> String {
     }
 }
 
+/// Prints a semantic error (from the analyzer) with colorized formatting.
 pub fn print_semantic_error(err: &SemanticError) {
     let msg = err.to_string();
     if let Some((code, rest)) = extract_error_code(&msg) {
@@ -158,15 +173,19 @@ pub fn print_semantic_error(err: &SemanticError) {
     }
 }
 
+/// Prints a parse error (from the parser) with colorized formatting.
 pub fn print_parse_error(err: &ParseError) {
     let code = "error[E2001]"; // Standard parse error code
     eprintln!("{}: {}", color_bold_red(code), err);
 }
 
+/// Prints a note (additional info) in yellow.
 pub fn print_note(note: &str) {
     eprintln!("{}: {}", color_bold_yellow("note"), note);
 }
 
+/// Prints a parse error with source code snippet and caret.
+/// Used for errors with line/column info.
 pub fn print_parse_error_with_source(err: &ParseError, source: &str, filename: &str) {
     match err {
         ParseError::UnexpectedTokenAt { msg, line, col } => {
@@ -179,17 +198,14 @@ pub fn print_parse_error_with_source(err: &ParseError, source: &str, filename: &
         }
         _ => {
             let code = "error[E2001]"; // Standard parse error code
-            eprintln!(
-                "{} {}: {}",
-                color_bold_red(code),
-                color_dim(filename),
-                err
-            );
+            eprintln!("{} {}: {}", color_bold_red(code), color_dim(filename), err);
             eprintln!("");
         }
     }
 }
 
+/// Represents a single diagnostic (error or warning) record.
+/// Used for grouped reporting and source annotation.
 #[derive(Debug, Clone)]
 pub struct DiagnosticRecord {
     pub filename: String,
@@ -199,6 +215,8 @@ pub struct DiagnosticRecord {
     pub is_parse: bool,
 }
 
+/// Prints grouped diagnostics by file, with colorized output and source snippets.
+/// Handles both parse and semantic errors, and annotates locations if available.
 pub fn print_grouped(records: &[DiagnosticRecord], sources: &HashMap<String, String>) {
     let mut by_file: HashMap<&str, Vec<&DiagnosticRecord>> = HashMap::new();
     for r in records {
@@ -219,7 +237,7 @@ pub fn print_grouped(records: &[DiagnosticRecord], sources: &HashMap<String, Str
                         continue;
                     }
                 }
-                
+
                 // Handle semantic errors
                 if let Some((code, rest)) = extract_error_code(&r.message) {
                     eprintln!("{}: {}", color_bold_red(&code), colorize_message(&rest));
