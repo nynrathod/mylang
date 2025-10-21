@@ -2,12 +2,12 @@
 name = "mylang"
 version = "0.1.0"
 edition = "2021"
+default-run = "mylang"
 
 [dependencies]
 inkwell = { version = "0.6.0", features = ["llvm18-1"] }
 llvm-sys = "=181.2.0"
-# clap = "4.5.47"
-
+clap = { version = "4.5", features = ["derive"] }
 
 [profile.dev]
 incremental = true
@@ -18,4 +18,8 @@ path = "src/lib.rs"
 
 [[bin]]
 name = "mylang"
-path = "src/main.rs"
+path = "src/bin/mylang.rs"  # Change this
+
+[[bin]]
+name = "mylang-dev"
+path = "src/main.rs"  # Keep your dev tool

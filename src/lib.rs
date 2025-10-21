@@ -3,6 +3,7 @@
 
 pub mod analyzer;
 pub mod codegen;
+pub mod compiler;
 pub mod diagnostics;
 pub mod lexar;
 pub mod mir;
