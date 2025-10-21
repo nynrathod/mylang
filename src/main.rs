@@ -15,7 +15,6 @@ fn main() {
         keep_ll: true,
         keep_obj: false,
         check_only: false,
-        release_mode: false,
     };
 
     let output_name = opts.output_name.clone();
