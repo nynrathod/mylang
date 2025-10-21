@@ -254,18 +254,10 @@ pub fn build_function_decl(builder: &mut MirBuilder, node: &AstNode) {
                     }
 
                     if let Some(target) = init_label {
-                        eprintln!(
-                            "[FIX] Function '{}': Setting entry block '{}' to jump to init block '{}'",
-                            name, entry_label, target
-                        );
                         func.blocks[0].terminator = Some(MirInstr::Jump { target });
                     } else {
                         // Fallback: jump to first block after entry
                         let first_block = func.blocks[1].label.clone();
-                        eprintln!(
-                            "[FIX] Function '{}': No init found, jumping to first block '{}'",
-                            name, first_block
-                        );
                         func.blocks[0].terminator = Some(MirInstr::Jump {
                             target: first_block,
                         });

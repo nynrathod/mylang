@@ -29,8 +29,9 @@ impl SemanticAnalyzer {
     /// Create a new semantic analyzer with empty symbol/function tables.
     pub fn new(project_root: Option<PathBuf>) -> Self {
         let project_root = project_root.unwrap_or_else(|| std::env::current_dir().unwrap());
-
-        println!("[DEBUG] Project root set to: {:?}", project_root);
+        if cfg!(debug_assertions) {
+            println!("[DEBUG] Project root set to: {:?}", project_root);
+        }
 
         Self {
             symbol_table: HashMap::new(),
@@ -56,10 +57,6 @@ impl SemanticAnalyzer {
             match node {
                 // Process imports first to load external functions
                 AstNode::Import { path, symbol } => {
-                    println!(
-                        "[DEBUG] [analyze_program] Found import node: path={:?}, symbol={:?}",
-                        path, symbol
-                    );
                     if let Err(e) = self.import_module(path, symbol) {
                         println!("[ERROR] [analyze_program] import_module failed for path={:?}, symbol={:?}: {}", path, symbol, e);
                         return Err(e);
@@ -91,16 +88,9 @@ impl SemanticAnalyzer {
                         name.to_string(),
                         (param_types, return_type.clone().unwrap_or(TypeNode::Void)),
                     );
-                    println!("[DEBUG] [analyze_program] Registered function: {}", name);
                 }
                 _ => {} // Skip other nodes in first pass
             }
-        }
-
-        // Debug: Print function_table after imports and function signature registration
-        println!("[DEBUG] function_table after imports and local function registration:");
-        for (name, (params, ret)) in &self.function_table {
-            println!("  [REGISTERED] fn {}({:?}) -> {:?}", name, params, ret);
         }
 
         // SECOND PASS: Analyze all nodes (including function bodies)
@@ -269,8 +259,6 @@ impl SemanticAnalyzer {
         // Add .my extension
         buf.set_extension("my");
 
-        println!("[DEBUG] [resolve_module_path] Checking path: {:?}", buf);
-
         if buf.exists() {
             Some(buf)
         } else {
@@ -283,10 +271,6 @@ impl SemanticAnalyzer {
         path: &[String],
         symbol: &Option<String>,
     ) -> Result<(), SemanticError> {
-        println!(
-            "[DEBUG] [import_module] ENTRY: path={:?}, symbol={:?}",
-            path, symbol
-        );
         // Create module key for circular import detection
 
         let module_key = path.join("::");
@@ -327,37 +311,13 @@ impl SemanticAnalyzer {
                 .parse_program()
                 .map_err(|_| SemanticError::ParseError)?;
 
-            println!("[DEBUG] [import_module] Parsed AST from {:?}:", file_path);
-            match &ast {
-                crate::parser::ast::AstNode::Program(nodes) => {
-                    for node in nodes {
-                        println!("  [AST NODE] {:?}", node);
-                    }
-                }
-                _ => println!("  [AST NODE] Not a Program variant"),
-            }
-
             if let crate::parser::ast::AstNode::Program(nodes) = ast {
                 // Create a temporary analyzer and analyze (will be fast since already done)
-
                 let mut imported_analyzer = SemanticAnalyzer::new(Some(self.project_root.clone()));
-
                 let mut nodes_mut = nodes.clone();
-
                 imported_analyzer.analyze_program(&mut nodes_mut)?;
-
-                println!("[DEBUG] [import_module] After analyzing (already_analyzed) {:?}, imported_analyzer.function_table:", file_path);
-
-                for (name, (params, ret)) in &imported_analyzer.function_table {
-                    println!("  [IMPORTED] fn {}({:?}) -> {:?}", name, params, ret);
-                }
-
                 (nodes, imported_analyzer)
             } else {
-                println!(
-                    "[WARNING] [import_module] Parsed AST from {:?} is not a Program variant",
-                    file_path
-                );
                 return Ok(());
             }
         } else {
@@ -378,16 +338,6 @@ impl SemanticAnalyzer {
                 .parse_program()
                 .map_err(|_| SemanticError::ParseError)?;
 
-            println!("[DEBUG] [import_module] Parsed AST from {:?}:", file_path);
-            match &ast {
-                crate::parser::ast::AstNode::Program(nodes) => {
-                    for node in nodes {
-                        println!("  [AST NODE] {:?}", node);
-                    }
-                }
-                _ => println!("  [AST NODE] Not a Program variant"),
-            }
-
             // Recursively analyze the imported AST
             if let crate::parser::ast::AstNode::Program(mut nodes) = ast {
                 // Create a temporary analyzer to collect public functions from the imported module
@@ -397,12 +347,6 @@ impl SemanticAnalyzer {
                 // Use analyze_program for proper two-pass analysis
 
                 imported_analyzer.analyze_program(&mut nodes)?;
-
-                println!("[DEBUG] [import_module] After analyzing {:?}, imported_analyzer.function_table:", file_path);
-
-                for (name, (params, ret)) in &imported_analyzer.function_table {
-                    println!("  [IMPORTED] fn {}({:?}) -> {:?}", name, params, ret);
-                }
 
                 (nodes, imported_analyzer)
             } else {
@@ -436,7 +380,6 @@ impl SemanticAnalyzer {
                             // Copy function signature to current function table
                             if let Some((params, ret)) = imported_analyzer.function_table.get(name)
                             {
-                                println!("[DEBUG] [import_module] Merging function '{}' from imported_analyzer into parent function_table", name);
                                 self.function_table
                                     .insert(name.clone(), (params.clone(), ret.clone()));
                             } else {
@@ -455,7 +398,6 @@ impl SemanticAnalyzer {
                             self.imported_functions.push(node.clone());
                         }
                         if let Some((params, ret)) = imported_analyzer.function_table.get(name) {
-                            println!("[DEBUG] [import_module] Merging function '{}' from imported_analyzer into parent function_table", name);
                             self.function_table
                                 .insert(name.clone(), (params.clone(), ret.clone()));
                         } else {

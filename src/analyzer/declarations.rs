@@ -222,11 +222,6 @@ impl SemanticAnalyzer {
             }
         }
 
-        println!(
-            "Restoring symbol table for function {}, outer_symbol_table is: {:?}",
-            name, self.outer_symbol_table
-        );
-
         // Restore outer scope after function analysis.
         if let Some(outer) = self.outer_symbol_table.take() {
             self.symbol_table = outer;
