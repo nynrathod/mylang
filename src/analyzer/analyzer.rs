@@ -58,7 +58,6 @@ impl SemanticAnalyzer {
                 // Process imports first to load external functions
                 AstNode::Import { path, symbol } => {
                     if let Err(e) = self.import_module(path, symbol) {
-                        println!("[ERROR] [analyze_program] import_module failed for path={:?}, symbol={:?}: {}", path, symbol, e);
                         return Err(e);
                     }
                 }
@@ -71,7 +70,6 @@ impl SemanticAnalyzer {
                 } => {
                     // Check if function already defined
                     if self.function_table.contains_key(name) {
-                        println!("[ERROR] [analyze_program] Function redeclaration: {}", name);
                         return Err(SemanticError::FunctionRedeclaration(NamedError {
                             name: name.to_string(),
                         }));
