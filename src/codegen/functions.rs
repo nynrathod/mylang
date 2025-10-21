@@ -70,7 +70,10 @@ impl<'ctx> CodeGen<'ctx> {
             .collect();
 
         // Determine return type
-        let fn_type = if let Some(ref ret_type_str) = func.return_type {
+        let fn_type = if func.name == "main" {
+            // Force main to be i32 () for C/Clang compatibility
+            self.context.i32_type().fn_type(&param_types, false)
+        } else if let Some(ref ret_type_str) = func.return_type {
             if ret_type_str.contains("Void") {
                 self.context.void_type().fn_type(&param_types, false)
             } else if ret_type_str.contains("String") || ret_type_str.contains("Str") {
@@ -197,7 +200,10 @@ impl<'ctx> CodeGen<'ctx> {
             .collect();
 
         // Determine return type and create function signature
-        let fn_type = if let Some(ref ret_type_str) = func.return_type {
+        let fn_type = if func.name == "main" {
+            // Force main to be i32 () for C/Clang compatibility
+            self.context.i32_type().fn_type(&param_types, false)
+        } else if let Some(ref ret_type_str) = func.return_type {
             // Map MIR type strings to LLVM types
             if ret_type_str.contains("Void") {
                 self.context.void_type().fn_type(&param_types, false)
