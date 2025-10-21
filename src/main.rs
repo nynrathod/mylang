@@ -13,6 +13,7 @@ fn main() {
         print_ast: true,
         print_mir: true,
         keep_ll: true,
+        keep_obj: false,
         check_only: false,
         release_mode: false,
     };
