@@ -23,6 +23,9 @@ pub struct SemanticAnalyzer {
     pub imported_functions: Vec<AstNode>, // Store imported function AST nodes for MIR generation
     pub loop_depth: usize,                // Track loop nesting for break/continue error handling
     pub scope_stack: Vec<HashMap<String, SymbolInfo>>, // Scope stack for block scoping
+
+    // NEW: Error collection
+    pub collected_errors: Vec<SemanticError>, // Collect errors instead of returning immediately
 }
 
 impl SemanticAnalyzer {
@@ -42,6 +45,7 @@ impl SemanticAnalyzer {
             imported_functions: Vec::new(),
             loop_depth: 0,
             scope_stack: Vec::new(),
+            collected_errors: Vec::new(), // Initialize error collection
         }
     }
 
@@ -52,13 +56,15 @@ impl SemanticAnalyzer {
     /// 2. Second pass: Analyze function bodies and other statements
     pub fn analyze_program(&mut self, nodes: &mut Vec<AstNode>) -> Result<(), SemanticError> {
         // FIRST PASS: Process imports and register all function signatures
+        // Collect errors but don't stop at first module error
 
         for node in nodes.iter_mut() {
             match node {
                 // Process imports first to load external functions
                 AstNode::Import { path, symbol } => {
                     if let Err(e) = self.import_module(path, symbol) {
-                        return Err(e);
+                        // Collect error but don't return immediately - continue processing
+                        self.collected_errors.push(e);
                     }
                 }
                 // Register local function signatures
@@ -70,9 +76,10 @@ impl SemanticAnalyzer {
                 } => {
                     // Check if function already defined
                     if self.function_table.contains_key(name) {
-                        return Err(SemanticError::FunctionRedeclaration(NamedError {
+                        self.collected_errors.push(SemanticError::FunctionRedeclaration(NamedError {
                             name: name.to_string(),
                         }));
+                        continue;
                     }
 
                     // Collect parameter types
@@ -97,11 +104,19 @@ impl SemanticAnalyzer {
 
         for node in nodes {
             if !matches!(node, AstNode::Import { .. }) {
-                self.analyze_node(node)?;
+                if let Err(e) = self.analyze_node(node) {
+                    self.collected_errors.push(e);
+                }
             }
         }
 
-        Ok(())
+        // Return first error if any were collected, or Ok if no errors
+        if let Some(first_error) = self.collected_errors.first() {
+            // For now, just return a generic parse error since SemanticError doesn't implement Clone
+            Err(SemanticError::ParseError)
+        } else {
+            Ok(())
+        }
     }
 
     /// Determines if a type should use reference counting.
