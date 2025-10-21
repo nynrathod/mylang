@@ -13,6 +13,7 @@ use inkwell::targets::{
     CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine,
 };
 use inkwell::OptimizationLevel;
+use regex::Regex;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -100,6 +101,7 @@ pub fn compile_project(opts: CompileOptions) -> Result<CompileResult, String> {
 
     let mut diagnostics: Vec<DiagnosticRecord> = Vec::new();
     let mut error_count = 0;
+    let mut sources = HashMap::new();
 
     // Parse statements from tokens
     let mut statements = Vec::new();
@@ -128,20 +130,63 @@ pub fn compile_project(opts: CompileOptions) -> Result<CompileResult, String> {
 
     // === 4. Semantic Analysis ===
     if let Err(e) = analyzer.analyze_program(&mut statements) {
-        diagnostics.push(DiagnosticRecord {
-            filename: input_path.display().to_string(),
-            message: e.to_string(),
-            line: None,
-            col: None,
-            is_parse: false,
-        });
-        error_count += 1;
+        use crate::analyzer::types::SemanticError;
+        match &e {
+            SemanticError::ParseErrorInModule { file, error } => {
+                // Use regex to extract line, col, and message from error string like:
+                // "parse error at 6:7: Expected OpenParen, got Semi (";")"
+                let re = Regex::new(r"at (\d+):(\d+): (.+)").unwrap();
+                let (line, col, msg) = if let Some(caps) = re.captures(error) {
+                    (
+                        caps.get(1).and_then(|m| m.as_str().parse().ok()),
+                        caps.get(2).and_then(|m| m.as_str().parse().ok()),
+                        caps.get(3)
+                            .map(|m| m.as_str().to_string())
+                            .unwrap_or_else(|| error.clone()),
+                    )
+                } else {
+                    (None, None, error.clone())
+                };
+                diagnostics.push(DiagnosticRecord {
+                    filename: file.clone(),
+                    message: msg,
+                    line,
+                    col,
+                    is_parse: true,
+                });
+                // Try to load the imported file source for snippet display
+                if !sources.contains_key(file) {
+                    if let Ok(src) = std::fs::read_to_string(file) {
+                        sources.insert(file.clone(), src);
+                    }
+                }
+                error_count += 1;
+            }
+            _ => {
+                diagnostics.push(DiagnosticRecord {
+                    filename: input_path.display().to_string(),
+                    message: e.to_string(),
+                    line: None,
+                    col: None,
+                    is_parse: false,
+                });
+                error_count += 1;
+            }
+        }
     }
 
     // Print diagnostics if any errors found
     if !diagnostics.is_empty() {
-        let mut sources = HashMap::new();
+        // Always include main file source
         sources.insert(input_path.display().to_string(), input.clone());
+        // Also try to load sources for any other files in diagnostics
+        for diag in &diagnostics {
+            if !sources.contains_key(&diag.filename) {
+                if let Ok(src) = std::fs::read_to_string(&diag.filename) {
+                    sources.insert(diag.filename.clone(), src);
+                }
+            }
+        }
         print_grouped(&diagnostics, &sources);
     }
 
