@@ -2,7 +2,7 @@
 name = "mylang"
 version = "0.1.0"
 edition = "2021"
-default-run = "mylang"
+default-run = "wow"
 
 [dependencies]
 inkwell = { version = "0.6.0", features = ["llvm18-1"] }
@@ -17,8 +17,8 @@ name = "mylang"
 path = "src/lib.rs"
 
 [[bin]]
-name = "mylang"
-path = "src/bin/mylang.rs"  # Change this
+name = "wow"
+path = "src/bin/wow.rs"
 
 [[bin]]
 name = "mylang-dev"
