@@ -106,7 +106,11 @@ impl<'a> Parser<'a> {
                 }
                 TokenType::OpenBracket => self.parse_array_literal(),
                 TokenType::OpenBrace => self.parse_map_literal(),
-                _ => Err(ParseError::UnexpectedTokenAt { msg: format!("Expected primary expression, got {:?}", tok.kind), line: tok.line, col: tok.col }),
+                _ => Err(ParseError::UnexpectedTokenAt {
+                    msg: format!("Expected primary expression, got {:?}", tok.kind),
+                    line: tok.line,
+                    col: tok.col,
+                }),
             }
         } else {
             Err(ParseError::EndOfInput)
@@ -139,7 +143,6 @@ impl<'a> Parser<'a> {
             },
             TokenType::CloseBrace,
         )?;
-        println!("mapsss {:?}", entries);
         self.expect(TokenType::CloseBrace)?;
         Ok(AstNode::MapLiteral(entries))
     }

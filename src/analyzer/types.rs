@@ -114,6 +114,11 @@ pub enum SemanticError {
     // --- Module Import Errors ---
     ModuleNotFound(String),
     ParseError,
+
+    ParseErrorInModule {
+        file: String,
+        error: String,
+    },
 }
 
 impl fmt::Display for TypeNode {
@@ -209,6 +214,8 @@ impl SemanticError {
             // Module Import / Parse
             SemanticError::ModuleNotFound(_) => "E0701",
             SemanticError::ParseError => "E0702",
+
+            SemanticError::ParseErrorInModule { .. } => "E0703",
         }
     }
 }
@@ -427,6 +434,10 @@ impl fmt::Display for SemanticError {
             // Module Import / Parse
             E::ModuleNotFound(p) => write!(f, "error[{}]: module not found: {}", self.code(), p),
             E::ParseError => write!(f, "error[{}]: parse error in imported module", self.code()),
+
+            E::ParseErrorInModule { file, error } => {
+                write!(f, "error[{}] in {}: {}", self.code(), file, error)
+            }
         }
     }
 }

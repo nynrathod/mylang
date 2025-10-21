@@ -307,7 +307,10 @@ impl SemanticAnalyzer {
 
             let ast = parser
                 .parse_program()
-                .map_err(|_| SemanticError::ParseError)?;
+                .map_err(|e| SemanticError::ParseErrorInModule {
+                    file: file_path.display().to_string(),
+                    error: e.to_string(),
+                })?;
 
             if let crate::parser::ast::AstNode::Program(nodes) = ast {
                 // Create a temporary analyzer and analyze (will be fast since already done)
@@ -334,7 +337,10 @@ impl SemanticAnalyzer {
 
             let ast = parser
                 .parse_program()
-                .map_err(|_| SemanticError::ParseError)?;
+                .map_err(|e| SemanticError::ParseErrorInModule {
+                    file: file_path.display().to_string(),
+                    error: e.to_string(),
+                })?;
 
             // Recursively analyze the imported AST
             if let crate::parser::ast::AstNode::Program(mut nodes) = ast {
