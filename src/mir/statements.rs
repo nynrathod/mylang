@@ -1058,8 +1058,12 @@ pub fn build_statement(builder: &mut MirBuilder, stmt: &AstNode, block: &mut Mir
 
             // Add the initialization block FIRST, then the loop blocks
             if let Some(current_func) = builder.program.functions.last_mut() {
-                // Push the current block (containing initialization) before loop blocks
-                if !block.instrs.is_empty() || block.terminator.is_some() {
+                // ALWAYS push the current block if it has instructions OR will have a terminator
+                // This ensures statements before the loop are not lost
+                if !block.instrs.is_empty() {
+                    current_func.blocks.push(block.clone());
+                } else if block.terminator.is_some() {
+                    // Block has terminator but no instructions - still add it for flow control
                     current_func.blocks.push(block.clone());
                 }
 
