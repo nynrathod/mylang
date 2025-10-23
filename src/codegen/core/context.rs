@@ -87,6 +87,7 @@ pub struct CodeGen<'ctx> {
     pub array_metadata: HashMap<String, ArrayMetadata>,
     pub map_metadata: HashMap<String, MapMetadata>,
     pub loop_stack: Vec<LoopContext>,
+    pub loop_local_vars: std::collections::HashSet<String>, // Track variables allocated inside loop bodies (must not be cleaned up at function level)
     pub arrayget_sources: HashMap<String, String>, // Maps ArrayGet result names to their source array names
     pub current_function_params: Vec<(String, Option<String>)>, // Track current function parameters (name, type) for RC on return
     pub function_return_types: HashMap<String, String>, // Track function return types for proper RC handling on call results
@@ -126,6 +127,7 @@ impl<'ctx> CodeGen<'ctx> {
             array_metadata: HashMap::new(),
             map_metadata: HashMap::new(),
             loop_stack: Vec::new(),
+            loop_local_vars: std::collections::HashSet::new(),
             arrayget_sources: HashMap::new(),
             current_function_params: Vec::new(),
             function_return_types: HashMap::new(),
@@ -170,5 +172,19 @@ impl<'ctx> CodeGen<'ctx> {
         if let Some(ctx) = self.loop_stack.last_mut() {
             ctx.loop_vars.push(var);
         }
+    }
+
+    /// Check if a variable is a loop iteration variable in any active loop
+    pub fn is_loop_var(&self, var: &str) -> bool {
+        let var_base = var.trim_start_matches('%').trim_end_matches("_array");
+        for loop_ctx in &self.loop_stack {
+            for loop_var in &loop_ctx.loop_vars {
+                let loop_var_base = loop_var.trim_start_matches('%').trim_end_matches("_array");
+                if loop_var_base == var_base {
+                    return true;
+                }
+            }
+        }
+        false
     }
 }
