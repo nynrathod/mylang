@@ -53,17 +53,15 @@ impl<'ctx> CodeGen<'ctx> {
 
         for (idx, value) in values.iter().enumerate() {
             let value_base = value.trim_start_matches('%').trim_end_matches("_array");
-            let is_single_char = value_base.len() == 1;
-            let is_common_loop_var = matches!(
-                value_base,
-                "item" | "elem" | "element" | "key" | "val" | "value" | "n"
-            );
 
-            let is_array = !is_single_char
-                && !is_common_loop_var
+            // Check if this value is a loop iteration variable (should NOT be treated as array/map)
+            let is_loop_var = self.is_loop_var(value);
+
+            // Check if this value is an array or map by looking at metadata
+            // But NEVER treat loop iteration variables as arrays/maps
+            let is_array = !is_loop_var
                 && (self.array_metadata.contains_key(value) || self.heap_arrays.contains(value));
-            let is_map = !is_single_char
-                && !is_common_loop_var
+            let is_map = !is_loop_var
                 && (self.map_metadata.contains_key(value) || self.heap_maps.contains(value));
 
             if is_array {
@@ -113,19 +111,37 @@ impl<'ctx> CodeGen<'ctx> {
                         .unwrap();
 
                     // Use select to choose between "true" and "false" strings
-                    let true_str = if idx < values.len() - 1 { "true " } else { "true" };
-                    let false_str = if idx < values.len() - 1 { "false " } else { "false" };
+                    let true_str = if idx < values.len() - 1 {
+                        "true "
+                    } else {
+                        "true"
+                    };
+                    let false_str = if idx < values.len() - 1 {
+                        "false "
+                    } else {
+                        "false"
+                    };
 
-                    let true_global = self.builder.build_global_string_ptr(true_str, "bool_true").unwrap();
-                    let false_global = self.builder.build_global_string_ptr(false_str, "bool_false").unwrap();
+                    let true_global = self
+                        .builder
+                        .build_global_string_ptr(true_str, "bool_true")
+                        .unwrap();
+                    let false_global = self
+                        .builder
+                        .build_global_string_ptr(false_str, "bool_false")
+                        .unwrap();
 
                     // Use select instruction to choose the correct string
-                    let selected_str = self.builder.build_select(
-                        is_false,
-                        false_global.as_pointer_value(),
-                        true_global.as_pointer_value(),
-                        "select_bool_str"
-                    ).unwrap().into_pointer_value();
+                    let selected_str = self
+                        .builder
+                        .build_select(
+                            is_false,
+                            false_global.as_pointer_value(),
+                            true_global.as_pointer_value(),
+                            "select_bool_str",
+                        )
+                        .unwrap()
+                        .into_pointer_value();
 
                     // Print the selected string
                     self.builder
@@ -289,14 +305,14 @@ impl<'ctx> CodeGen<'ctx> {
             if sym.ty.is_int_type() {
                 // Additional check: variable names that suggest boolean usage
                 let name_lower = var_name.to_lowercase();
-                return name_lower.contains("is_") ||
-                       name_lower.contains("has_") ||
-                       name_lower.contains("can_") ||
-                       name_lower.contains("should_") ||
-                       name_lower.contains("valid") ||
-                       name_lower.contains("equal") ||
-                       name_lower.contains("greater") ||
-                       name_lower.contains("less");
+                return name_lower.contains("is_")
+                    || name_lower.contains("has_")
+                    || name_lower.contains("can_")
+                    || name_lower.contains("should_")
+                    || name_lower.contains("valid")
+                    || name_lower.contains("equal")
+                    || name_lower.contains("greater")
+                    || name_lower.contains("less");
             }
         }
 
