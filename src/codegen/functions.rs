@@ -244,6 +244,10 @@ impl<'ctx> CodeGen<'ctx> {
             self.module.add_function(&func.name, fn_type, None)
         };
 
+        // Create a separate entry block for parameter allocation
+        let entry_block = self.context.append_basic_block(llvm_func, "entry");
+        self.builder.position_at_end(entry_block);
+
         // Create all necessary basic blocks within the function (e.g., entry, if.then, loop.body).
         let mut bb_map = HashMap::new();
         for block in &func.blocks {
@@ -251,15 +255,21 @@ impl<'ctx> CodeGen<'ctx> {
             bb_map.insert(block.label.clone(), bb);
         }
 
-        // Set the builder position to the function's entry block.
-        // Start with the first block from MIR (Block0, entry, etc.)
-        if let Some(first_block) = func.blocks.first() {
-            if let Some(bb) = bb_map.get(&first_block.label) {
-                self.builder.position_at_end(*bb);
-            }
-        }
+        // Clear ALL state before starting a new function
+        // Each function must have completely fresh scope with no interference from previous functions
+        self.symbols.clear();
+        self.array_metadata.clear();
+        self.map_metadata.clear();
+        self.arrayget_sources.clear();
+        self.temp_values.clear();
+        self.heap_strings.clear();
+        self.heap_arrays.clear();
+        self.heap_maps.clear();
+        self.composite_string_ptrs.clear();
+        self.loop_stack.clear();
+        self.loop_local_vars.clear();
 
-        // Allocate space for parameters and store their incoming values.
+        // Allocate space for parameters and store their incoming values in the entry block.
         // This ensures parameters are available as local variables in the function scope.
         for (i, param) in func.params.iter().enumerate() {
             let param_val = llvm_func.get_nth_param(i as u32).unwrap();
@@ -509,6 +519,14 @@ impl<'ctx> CodeGen<'ctx> {
             }
         }
 
+        // After ALL allocations in entry block, jump to first MIR block
+        if let Some(first_mir_block) = func.blocks.first() {
+            if let Some(first_bb) = bb_map.get(&first_mir_block.label) {
+                // Build unconditional branch from entry block to first MIR block
+                self.builder.build_unconditional_branch(*first_bb).unwrap();
+            }
+        }
+
         // Convert MIR block terminators to a unified structure for easier handling.
         // This simplifies codegen for control flow instructions.
         let codegen_blocks: Vec<CodegenBlock> = func
@@ -541,35 +559,8 @@ impl<'ctx> CodeGen<'ctx> {
             .collect();
 
         // Generate instructions and terminators for all blocks.
-        for block in &codegen_blocks {
-            let bb = bb_map.get(block.label).unwrap();
-            // Position builder at the start of the block
-            self.builder.position_at_end(*bb);
-
-            // Generate all instructions (assignments, operations) within the block.
-            for instr in block.instrs {
-                self.generate_instr(instr);
-            }
-
-            // Generate the block's terminating instruction (branch, return).
-            if let Some(term) = &block.terminator {
-                self.generate_terminator(term, llvm_func, &bb_map);
-            } else {
-                // No terminator - check if function is void or non-void
-                let fn_type = llvm_func.get_type();
-                let return_type = fn_type.get_return_type();
-
-                if return_type.is_none() {
-                    // Void function - add cleanup and return void
-                    self.generate_function_exit_cleanup();
-                    self.builder.build_return(None).unwrap();
-                } else {
-                    // Non-void function without terminator - this is an unreachable block
-                    // Just add cleanup but no return (LLVM will handle unreachable)
-                    self.generate_function_exit_cleanup();
-                    self.builder.build_unreachable().unwrap();
-                }
-            }
+        for block in &func.blocks {
+            self.generate_block_with_loops(block, llvm_func, &bb_map);
         }
 
         llvm_func
@@ -578,33 +569,86 @@ impl<'ctx> CodeGen<'ctx> {
     /// Generate cleanup for all RC variables at function exit
     /// This ensures variables in conditional blocks are properly cleaned up
     fn generate_function_exit_cleanup(&mut self) {
-        // Collect all RC variables from symbols (including loop arrays)
+        // OWNERSHIP MODEL:
+        // Only cleanup heap objects that:
+        // 1. Have a symbol (alloca in entry block) - these are guaranteed valid across all blocks
+        // 2. Are not loop-local (loop vars are cleaned in loop exit)
+        // 3. Are not compiler temporaries (temps like %123, data_ptr45, etc.)
+        //
+        // We NEVER cleanup:
+        // - Temporary GEP results (only exist in one block)
+        // - Values in temp_values that have no corresponding symbol
+        // - Block-local SSA values
+
+        // Helper to check if a name is a compiler temporary
+        let is_compiler_temp = |name: &str| -> bool {
+            name.starts_with('%')
+                || name.starts_with("data_ptr")
+                || name.starts_with("heap_")
+                || name.starts_with("rc_")
+                || name.starts_with("concat_")
+                || name.starts_with("temp_")
+                || name.contains("_ptr")
+                || name.contains("_header")
+                || name.contains("_val")
+                || name.contains("elem_")
+                || name.contains("pair_")
+                || name.contains("key_")
+                || name.contains("loaded")
+        };
+
+        // Collect heap strings from symbols (user variables only)
         let mut heap_strings: Vec<String> = self
             .symbols
             .keys()
-            .filter(|name| self.heap_strings.contains(*name))
+            .filter(|name| {
+                !self.loop_local_vars.contains(*name)
+                    && !is_compiler_temp(name)
+                    && self.heap_strings.contains(*name)
+            })
             .cloned()
             .collect();
         heap_strings.reverse();
 
+        // Collect heap arrays from symbols
         let mut heap_arrays: Vec<String> = self
             .symbols
             .keys()
-            .filter(|name| self.heap_arrays.contains(*name))
+            .filter(|name| {
+                !self.loop_local_vars.contains(*name)
+                    && !is_compiler_temp(name)
+                    && self.heap_arrays.contains(*name)
+            })
             .cloned()
             .collect();
         heap_arrays.reverse();
 
+        // Collect heap maps from symbols
         let mut heap_maps: Vec<String> = self
             .symbols
             .keys()
-            .filter(|name| self.heap_maps.contains(*name))
+            .filter(|name| {
+                !self.loop_local_vars.contains(*name)
+                    && !is_compiler_temp(name)
+                    && self.heap_maps.contains(*name)
+            })
             .cloned()
             .collect();
         heap_maps.reverse();
 
         // Cleanup composite strings in arrays/maps
-        for (_var_name, str_ptrs) in &self.composite_string_ptrs {
+        // SAFETY: Only cleanup strings from composites whose parent variable is a valid symbol
+        for (var_name, str_ptrs) in &self.composite_string_ptrs {
+            // Skip if parent variable doesn't exist in symbols
+            if !self.symbols.contains_key(var_name) {
+                continue;
+            }
+            // Skip loop-local and compiler temps
+            if self.loop_local_vars.contains(var_name) || is_compiler_temp(var_name) {
+                continue;
+            }
+
+            // Safe to cleanup: parent is a valid symbol
             for str_ptr in str_ptrs {
                 let data_ptr = str_ptr.into_pointer_value();
                 let rc_header = unsafe {
@@ -639,36 +683,11 @@ impl<'ctx> CodeGen<'ctx> {
             self.emit_decref(&var_name);
         }
 
-        // Cleanup temporary RC values not in symbols
-        let mut temp_str_vars: Vec<String> = self
-            .temp_values
-            .keys()
-            .filter(|name| self.heap_strings.contains(*name) && !self.symbols.contains_key(*name))
-            .cloned()
-            .collect();
-        temp_str_vars.reverse();
-
-        for var_name in temp_str_vars {
-            if let Some(val) = self.temp_values.get(&var_name) {
-                if val.is_pointer_value() {
-                    let data_ptr = val.into_pointer_value();
-                    let rc_header = unsafe {
-                        self.builder.build_in_bounds_gep(
-                            self.context.i8_type(),
-                            data_ptr,
-                            &[self.context.i32_type().const_int((-8_i32) as u64, true)],
-                            "rc_header",
-                        )
-                    }
-                    .unwrap();
-
-                    let decref = self.decref_fn.unwrap();
-                    self.builder
-                        .build_call(decref, &[rc_header.into()], "")
-                        .unwrap();
-                }
-            }
-        }
+        // NOTE: temp_values are NOT cleaned here.
+        // temp_values contains temporary SSA values (GEP results, block-local pointers).
+        // These either:
+        //  1. Are already covered by symbols (if they were stored), OR
+        //  2. Are block-local and should not be accessed in cleanup (would cause segfault)
     }
 
     /// Generates LLVM IR for a single MIR block.
@@ -906,15 +925,38 @@ impl<'ctx> CodeGen<'ctx> {
     pub fn generate_terminator(
         &mut self,
         term: &MirTerminator,
-        _l1func: FunctionValue<'ctx>, // Note: l1func is unused but kept for context/FFI
+        func: FunctionValue<'ctx>,
         bb_map: &HashMap<String, inkwell::basic_block::BasicBlock<'ctx>>,
     ) {
         match term {
             // Handles function return.
             // In functions.rs, MirTerminator::Return
             MirTerminator::Return { values } => {
-                // 1. Free strings in composites (both arrays AND maps)
-                for (_var_name, str_ptrs) in &self.composite_string_ptrs {
+                // SAFE COMPOSITE CLEANUP: Only decref strings from valid symbols
+                // We must NOT try to decref temporary GEP results that were created in other blocks
+
+                // 1. Cleanup composite strings - but ONLY for variables that exist in symbols
+                for (var_name, str_ptrs) in &self.composite_string_ptrs {
+                    // CRITICAL SAFETY CHECKS:
+                    // - Variable must exist in symbols (has an alloca in entry block)
+                    // - Variable must not be loop-local (loop vars are cleaned elsewhere)
+                    // - Variable must not be a compiler temporary
+                    if !self.symbols.contains_key(var_name) {
+                        continue;
+                    }
+                    if self.loop_local_vars.contains(var_name) {
+                        continue;
+                    }
+                    if var_name.starts_with('%')
+                        || var_name.starts_with("data_ptr")
+                        || var_name.starts_with("temp_")
+                        || var_name.contains("_ptr")
+                        || var_name.contains("elem_")
+                    {
+                        continue;
+                    }
+
+                    // Now it's safe to decref the string pointers in this composite
                     for str_ptr in str_ptrs {
                         let data_ptr = str_ptr.into_pointer_value();
                         let rc_header = unsafe {
@@ -934,35 +976,7 @@ impl<'ctx> CodeGen<'ctx> {
                     }
                 }
 
-                // Also handle map string tracking
-                for (var_name, str_names) in &self.composite_strings {
-                    if self.heap_maps.contains(var_name) {
-                        for str_name in str_names {
-                            if let Some(val) = self.temp_values.get(str_name) {
-                                if val.is_pointer_value() {
-                                    let data_ptr = val.into_pointer_value();
-                                    let rc_header = unsafe {
-                                        self.builder.build_in_bounds_gep(
-                                            self.context.i8_type(),
-                                            data_ptr,
-                                            &[self
-                                                .context
-                                                .i32_type()
-                                                .const_int((-8_i32) as u64, true)],
-                                            "rc_header",
-                                        )
-                                    }
-                                    .unwrap();
-
-                                    let decref = self.decref_fn.unwrap();
-                                    self.builder
-                                        .build_call(decref, &[rc_header.into()], "")
-                                        .unwrap();
-                                }
-                            }
-                        }
-                    }
-                }
+                // 2. Cleanup composite strings tracked via composite_strings map
 
                 // Determine what value is being returned (if any) to exclude it from cleanup
                 let return_value_name = if !values.is_empty() {
@@ -1019,115 +1033,16 @@ impl<'ctx> CodeGen<'ctx> {
                     self.emit_decref(&var_name);
                 }
 
-                // 5. Free temporary RC strings (from temp_values not in symbols, exclude return value)
-                // These are truly temporary values like function call arguments that are not stored
-                let mut temp_str_vars: Vec<String> = self
-                    .temp_values
-                    .keys()
-                    .filter(|name| {
-                        self.heap_strings.contains(*name)
-                            && !self.symbols.contains_key(*name)
-                            && return_value_name.map_or(true, |ret| ret != *name)
-                    })
-                    .cloned()
-                    .collect();
-                temp_str_vars.reverse();
-
-                for var_name in temp_str_vars {
-                    if let Some(val) = self.temp_values.get(&var_name) {
-                        if val.is_pointer_value() {
-                            let data_ptr = val.into_pointer_value();
-                            let rc_header = unsafe {
-                                self.builder.build_in_bounds_gep(
-                                    self.context.i8_type(),
-                                    data_ptr,
-                                    &[self.context.i32_type().const_int((-8_i32) as u64, true)],
-                                    "rc_header",
-                                )
-                            }
-                            .unwrap();
-
-                            let decref = self.decref_fn.unwrap();
-                            self.builder
-                                .build_call(decref, &[rc_header.into()], "")
-                                .unwrap();
-                        }
-                    }
-                }
-
-                // 6. Free temporary RC arrays (from temp_values not in symbols, exclude return value)
-                let mut temp_array_vars: Vec<String> = self
-                    .temp_values
-                    .keys()
-                    .filter(|name| {
-                        self.heap_arrays.contains(*name)
-                            && !self.symbols.contains_key(*name)
-                            && return_value_name.map_or(true, |ret| ret != *name)
-                    })
-                    .cloned()
-                    .collect();
-                temp_array_vars.reverse();
-
-                for var_name in temp_array_vars {
-                    if let Some(val) = self.temp_values.get(&var_name) {
-                        if val.is_pointer_value() {
-                            let data_ptr = val.into_pointer_value();
-                            let rc_header = unsafe {
-                                self.builder.build_in_bounds_gep(
-                                    self.context.i8_type(),
-                                    data_ptr,
-                                    &[self.context.i32_type().const_int((-8_i32) as u64, true)],
-                                    "rc_header",
-                                )
-                            }
-                            .unwrap();
-
-                            let decref = self.decref_fn.unwrap();
-                            self.builder
-                                .build_call(decref, &[rc_header.into()], "")
-                                .unwrap();
-                        }
-                    }
-                }
-
-                // 7. Free temporary RC maps (from temp_values not in symbols, exclude return value)
-                let mut temp_map_vars: Vec<String> = self
-                    .temp_values
-                    .keys()
-                    .filter(|name| {
-                        self.heap_maps.contains(*name)
-                            && !self.symbols.contains_key(*name)
-                            && return_value_name.map_or(true, |ret| ret != *name)
-                    })
-                    .cloned()
-                    .collect();
-                temp_map_vars.reverse();
-
-                for var_name in temp_map_vars {
-                    if let Some(val) = self.temp_values.get(&var_name) {
-                        if val.is_pointer_value() {
-                            let data_ptr = val.into_pointer_value();
-                            let rc_header = unsafe {
-                                self.builder.build_in_bounds_gep(
-                                    self.context.i8_type(),
-                                    data_ptr,
-                                    &[self.context.i32_type().const_int((-8_i32) as u64, true)],
-                                    "rc_header",
-                                )
-                            }
-                            .unwrap();
-
-                            let decref = self.decref_fn.unwrap();
-                            self.builder
-                                .build_call(decref, &[rc_header.into()], "")
-                                .unwrap();
-                        }
-                    }
-                }
-
                 if values.is_empty() {
-                    // Void return - no value
-                    self.builder.build_return(None).unwrap();
+                    // Check if this is the main function - it must return i32 0
+                    let fn_name = func.get_name().to_str().unwrap();
+                    if fn_name == "main" {
+                        let zero = self.context.i32_type().const_int(0, false);
+                        self.builder.build_return(Some(&zero)).unwrap();
+                    } else {
+                        // Void return - no value
+                        self.builder.build_return(None).unwrap();
+                    }
                 } else {
                     let return_value_name = &values[0];
 
@@ -1376,6 +1291,31 @@ impl<'ctx> CodeGen<'ctx> {
                 _ => return,
             };
             self.generate_terminator(&term, func, bb_map);
+        } else {
+            // No terminator - add appropriate return based on function type
+            let fn_name = func.get_name().to_str().unwrap();
+
+            // Check if main function needs special handling
+            if fn_name == "main" {
+                // Main function must return i32 0
+                self.generate_function_exit_cleanup();
+                let zero = self.context.i32_type().const_int(0, false);
+                self.builder.build_return(Some(&zero)).unwrap();
+            } else {
+                // For non-main functions, check return type
+                let fn_type = func.get_type();
+                let return_type = fn_type.get_return_type();
+
+                if return_type.is_none() {
+                    // Void function - add cleanup and return void
+                    self.generate_function_exit_cleanup();
+                    self.builder.build_return(None).unwrap();
+                } else {
+                    // Non-void function without terminator - unreachable
+                    self.generate_function_exit_cleanup();
+                    self.builder.build_unreachable().unwrap();
+                }
+            }
         }
     }
 
