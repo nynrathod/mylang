@@ -82,6 +82,24 @@ impl<'ctx> CodeGen<'ctx> {
             } => {
                 let val = self.resolve_value(value);
 
+                // Check if this value came from ArrayGet - if so, it's a loop iteration variable
+                // and should NEVER have array/map metadata propagated to it
+                let is_from_arrayget = self.arrayget_sources.contains_key(value);
+
+                // If assigning from ArrayGet, explicitly remove any existing array/map metadata
+                // from the destination variable to prevent stale metadata from previous loops
+                if is_from_arrayget {
+                    self.array_metadata.remove(name);
+                    self.map_metadata.remove(name);
+                    self.heap_arrays.remove(name);
+                    self.heap_maps.remove(name);
+
+                    // If this variable already exists from a previous block/loop,
+                    // remove it so we can create a fresh alloca in the current block
+                    // This prevents SSA violations when reusing variable names across loops
+                    self.symbols.remove(name);
+                }
+
                 let value_is_heap_str = self.heap_strings.contains(value);
                 let value_is_heap_array = self.heap_arrays.contains(value);
                 let value_is_heap_map = self.heap_maps.contains(value);
@@ -132,6 +150,10 @@ impl<'ctx> CodeGen<'ctx> {
                         self.heap_strings.insert(name.clone());
                         // Remove temp from tracking (ownership transferred to symbol)
                         self.heap_strings.remove(value);
+                        // Mark the temp as loop-local too (defensive - should already be marked by ArrayGet)
+                        if is_from_arrayget {
+                            self.loop_local_vars.insert(value.to_string());
+                        }
                         // Only incref when copying from an existing variable (not from a temp)
                         if self.symbols.contains_key(value) {
                             self.emit_incref(name);
@@ -224,25 +246,21 @@ impl<'ctx> CodeGen<'ctx> {
                         }
 
                         if let Some(metadata) = found_metadata {
-                            // Register under EXTENSIVE variations
-                            let base_name = name.trim_start_matches('%').trim_end_matches("_array");
-                            let name_variations = vec![
-                                name.to_string(),
-                                name.trim_end_matches("_array").to_string(),
-                                name.trim_start_matches('%').to_string(),
-                                format!("{}_array", name),
-                                format!("{}_array", base_name),
-                                base_name.to_string(),
-                                format!("{}item_array", base_name),
-                                format!("{}item", base_name),
-                            ];
-
-                            for variation in name_variations {
-                                self.array_metadata.insert(variation, metadata.clone());
+                            // Do not propagate array metadata to loop iteration variables
+                            // Loop variables contain scalar elements extracted from arrays, not arrays themselves
+                            // Also skip if value came from ArrayGet (definitely a loop iteration variable)
+                            if !self.is_loop_var(name) && !is_from_arrayget {
+                                // Register metadata only for the exact name, not extensive variations
+                                // This prevents accidental metadata leakage to unrelated variables
+                                self.array_metadata
+                                    .insert(name.to_string(), metadata.clone());
                             }
                         } else {
                             // Try to find metadata by checking if value points to a known array
-                            self.propagate_metadata(name, value);
+                            // But skip if assigning to a loop variable or if from ArrayGet
+                            if !self.is_loop_var(name) && !is_from_arrayget {
+                                self.propagate_metadata(name, value);
+                            }
                         }
                     } else if value_is_heap_map {
                         self.heap_maps.insert(name.clone());
@@ -252,11 +270,15 @@ impl<'ctx> CodeGen<'ctx> {
                         }
 
                         // Copy map metadata on re-assignment
-                        if let Some(metadata) = self.map_metadata.get(value).cloned() {
-                            self.map_metadata.insert(name.clone(), metadata);
-                        } else {
-                            // Try to find metadata by checking if value points to a known map
-                            self.propagate_metadata(name, value);
+                        // Copy map metadata
+                        // But NEVER propagate to loop iteration variables or ArrayGet results
+                        if !self.is_loop_var(name) && !is_from_arrayget {
+                            if let Some(metadata) = self.map_metadata.get(value).cloned() {
+                                self.map_metadata.insert(name.clone(), metadata);
+                            } else {
+                                // Try to find metadata by checking if value points to a known map
+                                self.propagate_metadata(name, value);
+                            }
                         }
                     } else {
                         // Even for non-heap reassignments, try to propagate metadata
@@ -265,7 +287,24 @@ impl<'ctx> CodeGen<'ctx> {
                     }
                 } else {
                     // Initial assignment
+                    // Create alloca in entry block for cross-block variables
+                    // Save current position
+                    let current_block = self.builder.get_insert_block().unwrap();
+                    let func = current_block.get_parent().unwrap();
+                    let entry_block = func.get_first_basic_block().unwrap();
+
+                    // Position at end of entry block (before terminator if exists)
+                    if let Some(terminator) = entry_block.get_terminator() {
+                        self.builder.position_before(&terminator);
+                    } else {
+                        self.builder.position_at_end(entry_block);
+                    }
+
                     let alloca = self.builder.build_alloca(val.get_type(), name).unwrap();
+
+                    // Restore position to current block
+                    self.builder.position_at_end(current_block);
+
                     self.builder.build_store(alloca, val).unwrap();
 
                     self.symbols.insert(
@@ -276,10 +315,21 @@ impl<'ctx> CodeGen<'ctx> {
                         },
                     );
 
+                    // Mark as block-local ONLY if assigning from ArrayGet
+                    // ArrayGet is ALWAYS used for loop iteration variables
+                    // Regular variables (even in conditionals) should be cleaned up normally
+                    if is_from_arrayget {
+                        self.loop_local_vars.insert(name.clone());
+                    }
+
                     if value_is_heap_str {
                         self.heap_strings.insert(name.clone());
                         // Remove temp from tracking (ownership transferred to symbol)
                         self.heap_strings.remove(value);
+                        // Mark the temp as loop-local too (defensive)
+                        if is_from_arrayget {
+                            self.loop_local_vars.insert(value.to_string());
+                        }
                         if self.symbols.contains_key(value) {
                             self.emit_incref(name);
                         }
@@ -344,25 +394,21 @@ impl<'ctx> CodeGen<'ctx> {
                         }
 
                         if let Some(metadata) = found_metadata {
-                            // Register under EXTENSIVE variations
-                            let base_name = name.trim_start_matches('%').trim_end_matches("_array");
-                            let name_variations = vec![
-                                name.to_string(),
-                                name.trim_end_matches("_array").to_string(),
-                                name.trim_start_matches('%').to_string(),
-                                format!("{}_array", name),
-                                format!("{}_array", base_name),
-                                base_name.to_string(),
-                                format!("{}item_array", base_name),
-                                format!("{}item", base_name),
-                            ];
-
-                            for variation in name_variations {
-                                self.array_metadata.insert(variation, metadata.clone());
+                            // Do not propagate array metadata to loop iteration variables
+                            // Loop variables contain scalar elements extracted from arrays, not arrays themselves
+                            // Also skip if value came from ArrayGet (definitely a loop iteration variable)
+                            if !self.is_loop_var(name) && !is_from_arrayget {
+                                // Register metadata only for the exact name, not extensive variations
+                                // This prevents accidental metadata leakage to unrelated variables
+                                self.array_metadata
+                                    .insert(name.to_string(), metadata.clone());
                             }
                         } else {
                             // Try to find metadata by checking if value points to a known array
-                            self.propagate_metadata(name, value);
+                            // But skip if assigning to a loop variable or if from ArrayGet
+                            if !self.is_loop_var(name) && !is_from_arrayget {
+                                self.propagate_metadata(name, value);
+                            }
                         }
                     } else if value_is_heap_map {
                         self.heap_maps.insert(name.clone());
@@ -373,18 +419,30 @@ impl<'ctx> CodeGen<'ctx> {
                         }
 
                         // Copy map metadata
-                        if let Some(metadata) = self.map_metadata.get(value).cloned() {
-                            self.map_metadata.insert(name.clone(), metadata);
-                        } else {
-                            // Try to find metadata by checking if value points to a known map
-                            self.propagate_metadata(name, value);
+                        // But NEVER propagate to loop iteration variables or ArrayGet results
+                        if !self.is_loop_var(name) && !is_from_arrayget {
+                            if let Some(metadata) = self.map_metadata.get(value).cloned() {
+                                self.map_metadata.insert(name.clone(), metadata);
+                            } else {
+                                // Try to find metadata by checking if value points to a known map
+                                self.propagate_metadata(name, value);
+                            }
                         }
                     } else {
                         // Even for initial non-heap assignments, try to propagate metadata
                         // This is critical for variables that store pointers
-                        self.propagate_metadata(name, value);
+                        // But skip if assigning to a loop variable or ArrayGet result
+                        if !self.is_loop_var(name) && !is_from_arrayget {
+                            self.propagate_metadata(name, value);
+                        }
                     }
                 }
+
+                // Clear arrayget_sources for this name after assignment
+                // This prevents stale metadata from persisting across different loops
+                // that reuse the same variable name (e.g., multiple loops with variable 'n')
+                self.arrayget_sources.remove(name);
+
                 Some(val)
             }
 
@@ -464,6 +522,12 @@ impl<'ctx> CodeGen<'ctx> {
                 // Track if this is a heap-allocated value and increment RC
                 if elem_type.is_pointer_type() && self.array_contains_strings(array) {
                     self.heap_strings.insert(name.clone());
+
+                    // Mark ALL ArrayGet results as loop-local
+                    // This is safe because ArrayGet is primarily used in loop contexts
+                    // Even if not technically in a loop, these are temporary extracted values
+                    // that should not be cleaned up at function level (they'll be cleaned at loop exit)
+                    self.loop_local_vars.insert(name.clone());
 
                     // Increment reference count when loading a string from an array
                     // This is critical for loop iterations where the same variable is reused
@@ -762,6 +826,11 @@ impl<'ctx> CodeGen<'ctx> {
                         },
                     );
                     self.builder.build_store(alloca, field_val).unwrap();
+
+                    // Always mark TupleGet variables as loop-local
+                    // TupleGet is used for map iteration (key, value) extraction
+                    // These variables are always loop-scoped and should not be cleaned at function level
+                    self.loop_local_vars.insert(name.clone());
                 }
 
                 // Track if this is a string that needs RC and apply RC increment
@@ -795,24 +864,17 @@ impl<'ctx> CodeGen<'ctx> {
 
     /// Propagate array/map metadata from source to destination by checking all possible sources
     pub fn propagate_metadata(&mut self, dest_name: &str, source_name: &str) {
+        // Never propagate metadata to loop iteration variables
+        // Loop variables are scalar values extracted from arrays/maps, not collections themselves
+        if self.is_loop_var(dest_name) {
+            return;
+        }
+
         // Try to propagate array metadata directly
         if let Some(metadata) = self.array_metadata.get(source_name).cloned() {
-            // Register under EXTENSIVE variations
-            let dest_base = dest_name.trim_start_matches('%').trim_end_matches("_array");
-            let dest_variations = vec![
-                dest_name.to_string(),
-                dest_name.trim_end_matches("_array").to_string(),
-                dest_name.trim_start_matches('%').to_string(),
-                format!("{}_array", dest_name),
-                format!("{}_array", dest_base),
-                dest_base.to_string(),
-                format!("{}item_array", dest_base),
-                format!("{}item", dest_base),
-            ];
-
-            for variation in dest_variations {
-                self.array_metadata.insert(variation, metadata.clone());
-            }
+            // Only propagate to the exact destination name, not wild variations
+            // This prevents accidental metadata leakage to unrelated variables
+            self.array_metadata.insert(dest_name.to_string(), metadata);
             return;
         }
 
@@ -833,22 +895,8 @@ impl<'ctx> CodeGen<'ctx> {
 
         for variation in &source_variations {
             if let Some(metadata) = self.array_metadata.get(variation).cloned() {
-                // Register under EXTENSIVE dest variations
-                let dest_base = dest_name.trim_start_matches('%').trim_end_matches("_array");
-                let dest_variations = vec![
-                    dest_name.to_string(),
-                    dest_name.trim_end_matches("_array").to_string(),
-                    dest_name.trim_start_matches('%').to_string(),
-                    format!("{}_array", dest_name),
-                    format!("{}_array", dest_base),
-                    dest_base.to_string(),
-                    format!("{}item_array", dest_base),
-                    format!("{}item", dest_base),
-                ];
-
-                for dest_var in dest_variations {
-                    self.array_metadata.insert(dest_var, metadata.clone());
-                }
+                // Only propagate to exact destination name
+                self.array_metadata.insert(dest_name.to_string(), metadata);
                 return;
             }
 
@@ -941,21 +989,13 @@ impl<'ctx> CodeGen<'ctx> {
             let dest_base_name = dest_name.trim_start_matches('%').trim_end_matches("_array");
 
             // STRICT FILTERING: Never propagate to loop item variables
-            // Don't propagate to:
-            // 1. Single character variable names (after trimming % and _array)
-            // 2. Very short names (2 chars or less)
-            // 3. Common loop variable patterns
-            let is_single_char = dest_base_name.len() == 1;
-            let is_short_var = dest_base_name.len() <= 2;
-            let is_common_loop_var = matches!(
-                dest_base_name,
-                "item" | "elem" | "element" | "key" | "val" | "value"
-            );
+            // Check if the destination is actually a loop iteration variable
+            let is_loop_iteration_var = self.is_loop_var(dest_name);
 
             // Only allow exact base name matches, no substring matching
             let is_exact_match = meta_base == source_base || meta_base == dest_base;
 
-            if !is_single_char && !is_short_var && !is_common_loop_var && is_exact_match {
+            if !is_loop_iteration_var && is_exact_match {
                 // Register under EXTENSIVE variations
                 let dest_variations = vec![
                     dest_name.to_string(),
