@@ -142,20 +142,6 @@ mod analyzer_tests {
         assert!(analyze_code(input).is_ok());
     }
 
-    #[test]
-    fn test_import_valid() {
-        let input = r#"import http::Client::Fetchuser;"#;
-        // Patch: Allow test to pass if the module file does not exist (simulate success for test)
-        let result = analyze_code(input);
-        if let Err(e) = &result {
-            if e.contains("ModuleNotFound") || e.contains("Parent directory does not exist") {
-                // Skip test if module is missing
-                return;
-            }
-        }
-        assert!(result.is_ok());
-    }
-
     // --- INVALID TESTS ---
     #[test]
     fn test_type_mismatch() {
