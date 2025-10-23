@@ -113,7 +113,7 @@ pub fn build_let_decl(builder: &mut MirBuilder, node: &AstNode) -> Vec<MirInstr>
 /// - Tracks reference-counted variables in function scope (but NOT parameters).
 /// - Maps function arguments to temporaries and assigns them to parameter names.
 /// - Builds MIR for each statement in the function body.
-/// - Ensures entry block jumps to loops if they exist (not returns immediately).
+/// - Properly connects blocks when loops are present.
 /// - Adds DecRef cleanup to the final reachable block only (no duplicates).
 /// - Parameters are NOT tracked for RC cleanup since caller owns them.
 /// - Adds an implicit return if none is present and the function has no return type.
@@ -142,9 +142,10 @@ pub fn build_function_decl(builder: &mut MirBuilder, node: &AstNode) {
         // it adds them to THIS function (via last_mut())
         builder.program.functions.push(func);
 
-        let entry_label = builder.next_block();
+        // Create the first block for the function body
+        let first_block_label = builder.next_block();
         let mut block = MirBlock {
-            label: entry_label.clone(),
+            label: first_block_label.clone(),
             instrs: vec![],
             terminator: None,
         };
@@ -174,126 +175,35 @@ pub fn build_function_decl(builder: &mut MirBuilder, node: &AstNode) {
             // The function borrows them, and caller handles cleanup
         }
 
-        // Track if we've already pushed the final block (to avoid duplicate insertion)
-        let mut final_block_pushed = false;
-
         // Build MIR for each statement in the function body.
         for stmt in body {
+            let old_label = block.label.clone();
             build_statement(builder, stmt, &mut block);
 
             // If the statement set a terminator (like a for-loop), subsequent statements
             // need a new block to avoid adding instructions after the terminator
             if block.terminator.is_some() {
-                // Save the current block label before adding it
-                let current_block_label = block.label.clone();
+                let block_was_updated = block.label != old_label;
 
-                // Add the current block to the function
-                if let Some(current_func) = builder.program.functions.last_mut() {
-                    current_func.blocks.push(block.clone());
-                    final_block_pushed = true;
-                }
-
-                // Create a new block for the next statement
-                let next_label = builder.next_block();
-                let next_block_label = next_label.clone();
-                block = MirBlock {
-                    label: next_label,
-                    instrs: vec![],
-                    terminator: None,
-                };
-                final_block_pushed = false;
-
-                // Don't connect loop exit blocks to continuation blocks
-                // Let them remain without terminators so they can get return statements added
-                // Only connect if there are actually more statements coming
-            }
-        }
-
-        // Check if there are loop blocks BEFORE we do anything else
-        // Loop blocks are added by build_statement to the function
-        let has_loop_blocks = if let Some(func) = builder.program.functions.last() {
-            !func.blocks.is_empty() // If blocks already exist, they are loop blocks
-        } else {
-            false
-        };
-
-        // Don't set entry terminator yet for loops - we'll do it after insertion
-        if !has_loop_blocks {
-            // No loops - entry is the only block
-            // Add return only if function has no explicit return type
-            if return_type.is_none() && block.terminator.is_none() {
-                // Don't add return yet - we'll add cleanup first, then return
-            }
-        }
-
-        // Insert the entry block at the BEGINNING of the function's blocks
-        // Only if it wasn't already pushed (to avoid duplicates)
-        if !final_block_pushed {
-            if let Some(func) = builder.program.functions.last_mut() {
-                func.blocks.insert(0, block);
-
-                // NOW find the init block and make entry jump to it
-                // Init block should have stores to loop variables (i, i_end, etc.)
-                if has_loop_blocks && func.blocks.len() > 1 {
-                    // Find the first block that has Store instructions (the init block)
-                    let mut init_label = None;
-                    for b in func.blocks.iter().skip(1) {
-                        // Init block has assigns/stores but no loads or comparisons
-                        let has_stores = b
-                            .instrs
-                            .iter()
-                            .any(|instr| matches!(instr, MirInstr::Assign { .. }));
-                        let has_ops = b
-                            .instrs
-                            .iter()
-                            .any(|instr| matches!(instr, MirInstr::BinaryOp(..)));
-                        if has_stores && !has_ops {
-                            init_label = Some(b.label.clone());
-                            break;
-                        }
+                if !block_was_updated {
+                    // Add the current block to the function
+                    if let Some(current_func) = builder.program.functions.last_mut() {
+                        current_func.blocks.push(block.clone());
                     }
 
-                    if let Some(target) = init_label {
-                        func.blocks[0].terminator = Some(MirInstr::Jump { target });
-                    } else {
-                        // Fallback: jump to first block after entry
-                        let first_block = func.blocks[1].label.clone();
-                        func.blocks[0].terminator = Some(MirInstr::Jump {
-                            target: first_block,
-                        });
-                    }
-                }
-            }
-        } else {
-            // Still need to set entry block jump for loops even if it was already pushed
-            if has_loop_blocks {
-                if let Some(func) = builder.program.functions.last_mut() {
-                    // Find init block (has stores but no binary ops)
-                    let mut init_label = None;
-                    for b in func.blocks.iter() {
-                        let has_stores = b
-                            .instrs
-                            .iter()
-                            .any(|instr| matches!(instr, MirInstr::Assign { .. }));
-                        let has_ops = b
-                            .instrs
-                            .iter()
-                            .any(|instr| matches!(instr, MirInstr::BinaryOp(..)));
-                        if has_stores && !has_ops {
-                            init_label = Some(b.label.clone());
-                            break;
-                        }
-                    }
+                    // Create a new block for the next statement
+                    let next_label = builder.next_block();
+                    block = MirBlock {
+                        label: next_label.clone(),
+                        instrs: vec![],
+                        terminator: None,
+                    };
 
-                    if let Some(target) = init_label {
-                        eprintln!(
-                            "[FIX] Function '{}': Setting already-pushed entry '{}' to jump to init '{}'",
-                            name, entry_label, target
-                        );
-                        // Find the entry block and set its terminator
-                        for b in func.blocks.iter_mut() {
-                            if b.label == entry_label {
-                                b.terminator = Some(MirInstr::Jump { target });
+                    // Connect the previous loop's exit block to this new continuation block
+                    if let Some(current_func) = builder.program.functions.last_mut() {
+                        for prev_block in current_func.blocks.iter_mut().rev() {
+                            if prev_block.terminator.is_none() && prev_block.label != next_label {
+                                prev_block.terminator = Some(MirInstr::Jump { target: next_label });
                                 break;
                             }
                         }
@@ -302,7 +212,14 @@ pub fn build_function_decl(builder: &mut MirBuilder, node: &AstNode) {
             }
         }
 
-        // NOW get cleanup instructions from exit_scope
+        // Add the final block if it has content or a terminator
+        if !block.instrs.is_empty() || block.terminator.is_some() {
+            if let Some(current_func) = builder.program.functions.last_mut() {
+                current_func.blocks.push(block.clone());
+            }
+        }
+
+        // Get cleanup instructions from exit_scope
         let mut temp_block = MirBlock {
             label: "temp_cleanup".to_string(),
             instrs: vec![],
@@ -311,16 +228,22 @@ pub fn build_function_decl(builder: &mut MirBuilder, node: &AstNode) {
         builder.exit_scope(&mut temp_block);
         let decref_instrs = temp_block.instrs;
 
-        // Add cleanup to the appropriate block (ONLY ONCE)
-        if has_loop_blocks {
-            // Add cleanup and return to ALL blocks without terminators
-            // (these are the blocks where execution could end)
-            if let Some(func) = builder.program.functions.last_mut() {
-                // Collect blocks that need cleanup (no terminator, not entry)
+        // Check if function has multiple blocks (loops exist)
+        let has_multiple_blocks = if let Some(func) = builder.program.functions.last() {
+            func.blocks.len() > 1
+        } else {
+            false
+        };
+
+        // Add cleanup to the appropriate blocks
+        if let Some(func) = builder.program.functions.last_mut() {
+            if has_multiple_blocks {
+                // Multiple blocks exist (loops are present)
+                // Add cleanup and return to ALL blocks without terminators
                 let blocks_needing_cleanup: Vec<String> = func
                     .blocks
                     .iter()
-                    .filter(|b| b.terminator.is_none() && b.label != entry_label)
+                    .filter(|b| b.terminator.is_none())
                     .map(|b| b.label.clone())
                     .collect();
 
@@ -336,14 +259,11 @@ pub fn build_function_decl(builder: &mut MirBuilder, node: &AstNode) {
                         // Only add return if function is void
                         if return_type.is_none() {
                             final_block.terminator = Some(MirInstr::Return { values: vec![] });
-                        } else {
                         }
                     }
                 }
-            }
-        } else {
-            // No loops - add cleanup to entry block (the only block)
-            if let Some(func) = builder.program.functions.last_mut() {
+            } else {
+                // Single block (no loops) - add cleanup to the only block
                 if let Some(entry_block) = func.blocks.first_mut() {
                     // Add decrefs to entry block
                     for decref_instr in decref_instrs {
