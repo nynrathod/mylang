@@ -220,6 +220,9 @@ impl<'ctx> CodeGen<'ctx> {
             },
         );
 
+        // Mark as loop-local variable (allocated inside loop body, cannot be cleaned up at function level)
+        self.loop_local_vars.insert(var.to_string());
+
         // Enter loop context for tracking and cleanup
         self.enter_loop(exit_block.to_string(), "for.array.cond".to_string());
         self.add_loop_var(var.to_string());
@@ -497,6 +500,10 @@ impl<'ctx> CodeGen<'ctx> {
                 ty: val_type,
             },
         );
+
+        // Mark key and value as loop-local variables (allocated inside loop body, cannot be cleaned up at function level)
+        self.loop_local_vars.insert(key_var.to_string());
+        self.loop_local_vars.insert(value_var.to_string());
 
         // Enter loop context with map type information
         self.enter_loop_with_type(
