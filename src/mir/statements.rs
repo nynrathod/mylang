@@ -422,15 +422,10 @@ pub fn build_statement(builder: &mut MirBuilder, stmt: &AstNode, block: &mut Mir
                         // If block already has a terminator, we're in a sequential loop situation
                         // The previous loop's exit block should already be handled below
                         if block.terminator.is_none() {
-                            eprintln!(
-                                "[DEBUG LOOP] Setting entry block terminator to jump to {}",
-                                loop_header
-                            );
                             block.terminator = Some(MirInstr::Jump {
                                 target: loop_header.clone(),
                             });
                         } else {
-                            eprintln!("[DEBUG LOOP] Entry block already has terminator, connecting previous loop exit to {}", loop_header);
                             // Sequential loops: connect previous loop's exit to this loop's header
                             if let Some(current_func) = builder.program.functions.last_mut() {
                                 // Find the most recently added exit block that has no terminator

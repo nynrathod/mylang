@@ -30,7 +30,6 @@ impl<'ctx> CodeGen<'ctx> {
             // Special handling for array/map variables - they should always be pointers
             let load_type =
                 if (name.contains("_array") || name.contains("_map")) && sym.ty.is_int_type() {
-                    // Type was incorrectly set as int, use pointer instead
                     self.context
                         .ptr_type(inkwell::AddressSpace::default())
                         .into()
@@ -54,8 +53,6 @@ impl<'ctx> CodeGen<'ctx> {
             return self.context.i32_type().const_int(0, false).into();
         }
 
-        eprintln!("Available temps: {:?}", self.temp_values.keys());
-        eprintln!("Available symbols: {:?}", self.symbols.keys());
         panic!(
             "Unknown variable or literal: {} - check your MIR generation",
             name

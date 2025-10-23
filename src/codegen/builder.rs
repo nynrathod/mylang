@@ -621,55 +621,6 @@ impl<'ctx> CodeGen<'ctx> {
                             metadata.value_is_string,
                         )
                     } else {
-                        // No metadata found - this is a critical error
-                        eprintln!(
-                        "\n╔════════════════════════════════════════════════════════════════════╗"
-                    );
-                        eprintln!(
-                            "║ ERROR: Map metadata lookup failed in TupleGet                     ║"
-                        );
-                        eprintln!(
-                        "╚════════════════════════════════════════════════════════════════════╝"
-                    );
-                        eprintln!("\n📍 Context:");
-                        eprintln!("  • Variable name: '{}'", name);
-                        eprintln!("  • Tuple variable: '{}'", tuple);
-                        eprintln!("  • Tuple index: {}", index);
-
-                        eprintln!("\n🔍 Search attempts:");
-                        for log in &search_log {
-                            eprintln!("  {}", log);
-                        }
-
-                        eprintln!("\n📊 Available map metadata:");
-                        if self.map_metadata.is_empty() {
-                            eprintln!("  (none)");
-                        } else {
-                            for (key, meta) in &self.map_metadata {
-                                eprintln!(
-                                    "  • '{}' → {{{}:{}}}, length={}",
-                                    key, meta.key_type, meta.value_type, meta.length
-                                );
-                            }
-                        }
-
-                        eprintln!("\n🔗 ArrayGet source tracking:");
-                        if self.arrayget_sources.is_empty() {
-                            eprintln!("  (none)");
-                        } else {
-                            for (result, source) in &self.arrayget_sources {
-                                eprintln!("  • '{}' ← ArrayGet from '{}'", result, source);
-                            }
-                        }
-
-                        eprintln!("\n💡 Possible causes:");
-                        eprintln!("  1. Map metadata not propagated to iteration variable");
-                        eprintln!("  2. ArrayGet tracking not capturing the source array");
-                        eprintln!("  3. Variable name mismatch between MIR and codegen");
-                        eprintln!(
-                        "\n═══════════════════════════════════════════════════════════════════\n"
-                    );
-
                         // Return dummy values to avoid crash, but this will produce incorrect IR
                         let dummy = self.context.i32_type().const_int(0, false);
                         self.temp_values.insert(name.clone(), dummy.into());

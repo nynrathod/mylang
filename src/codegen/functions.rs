@@ -96,7 +96,6 @@ impl<'ctx> CodeGen<'ctx> {
         self.declared_functions.insert(func.name.clone());
     }
 
-    // ADD THIS HELPER:
     fn map_type_to_llvm(&self, type_opt: &Option<String>) -> BasicMetadataTypeEnum<'ctx> {
         if let Some(type_str) = type_opt {
             if type_str.contains("String") || type_str.contains("Str") {
