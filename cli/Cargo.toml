@@ -1,0 +1,12 @@
+[package]
+name = "wow"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+mylang = { path = ".." }
+clap = { version = "4.5", features = ["derive"] }
+
+[[bin]]
+name = "wow"
+path = "src/main.rs"
