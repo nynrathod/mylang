@@ -1,6 +1,4 @@
 use clap::{Parser, Subcommand};
-use mylang::compiler::{compile_project, CompileOptions};
-use std::fs;
 use std::path::PathBuf;
 use std::process::{exit, Command};
 
@@ -85,37 +83,26 @@ enum Commands {
 /// Entry point for the wow CLI.
 /// Parses arguments and dispatches to the appropriate command handler.
 fn main() {
+    // Show welcome message if no arguments are provided
+    if std::env::args().len() == 1 {
+        println!("🎉 wow CLI installed! Type `wow --help` for usage.");
+        return;
+    }
+
     let cli = Cli::parse();
 
     match cli.command {
         // =========================
         // Build Command
         // =========================
-        Commands::Build { output, keep_ll } => {
-            // Set up compilation options for building.
-            let opts = CompileOptions {
-                input_path: PathBuf::from("."),
-                output_name: output,
-                dev_mode: false,
-                keep_ll,
-                ..Default::default()
-            };
-
-            // Compile the project and print result.
-            match compile_project(opts) {
-                Ok(result) => {
-                    if result.error_count > 0 {
-                        eprintln!("Build failed with {} errors", result.error_count);
-                        exit(1);
-                    } else {
-                        println!("✓ Build successful");
-                    }
-                }
-                Err(e) => {
-                    eprintln!("{}", e);
-                    exit(1);
-                }
-            }
+        Commands::Build {
+            output: _,
+            keep_ll: _,
+        } => {
+            println!(
+                "wow build is not supported in pure CLI mode. Use mylang.exe directly for builds."
+            );
+            exit(1);
         }
 
         // =========================
@@ -126,95 +113,38 @@ fn main() {
             keep_ll,
             args,
         } => {
-            use std::env;
-            use std::path::PathBuf;
-
-            fn find_mylang_exe() -> Option<PathBuf> {
-                // 1. Try same directory as wow.exe
-                if let Ok(current_exe) = env::current_exe() {
-                    if let Some(dir) = current_exe.parent() {
-                        let candidate = dir.join(if cfg!(windows) {
-                            "mylang.exe"
-                        } else {
-                            "mylang"
-                        });
-                        if candidate.exists() {
-                            return Some(candidate);
-                        }
-                    }
-                }
-                // 2. Try PATH
-                if let Ok(paths) = env::var("PATH") {
-                    for path in env::split_paths(&paths) {
-                        let candidate = path.join(if cfg!(windows) {
-                            "mylang.exe"
-                        } else {
-                            "mylang"
-                        });
-                        if candidate.exists() {
-                            return Some(candidate);
-                        }
-                    }
-                }
-                None
-            }
-
-            if let Some(mylang_exe) = find_mylang_exe() {
-                // Build arguments for mylang.exe
-                let mut mylang_args = vec![path.to_string_lossy().to_string()];
-                // Pass --keep-ll if requested
-                if keep_ll {
-                    mylang_args.push("--keep-ll".to_string());
-                }
-                // Pass any additional args
-                mylang_args.extend(args);
-
-                // Call mylang.exe as a subprocess
-                let status = Command::new(mylang_exe).args(&mylang_args).status();
-
-                match status {
-                    Ok(s) if s.success() => {}
-                    Ok(s) => exit(s.code().unwrap_or(1)),
-                    Err(e) => {
-                        eprintln!("Failed to run mylang.exe: {}", e);
-                        exit(1);
-                    }
-                }
+            // Try to find mylang.exe in PATH or current directory
+            let mylang_exe = if cfg!(windows) {
+                "mylang.exe"
             } else {
-                eprintln!("PATH: {:?}", std::env::var("PATH"));
-                eprintln!("Current exe: {:?}", std::env::current_exe());
-                eprintln!("Error: Could not find mylang executable. Please ensure mylang.exe is in the same directory as wow.exe or in your PATH.");
-                exit(1);
+                "mylang"
+            };
+            let mut mylang_args = vec![path.to_string_lossy().to_string()];
+            if keep_ll {
+                mylang_args.push("--keep-ll".to_string());
+            }
+            mylang_args.extend(args);
+
+            let status = Command::new(mylang_exe).args(&mylang_args).status();
+
+            match status {
+                Ok(s) if s.success() => {}
+                Ok(s) => exit(s.code().unwrap_or(1)),
+                Err(e) => {
+                    eprintln!("Failed to run mylang.exe: {}", e);
+                    exit(1);
+                }
             }
         }
 
         // =========================
         // Check Command
         // =========================
-        Commands::Check { path } => {
-            // Set up options for check-only mode.
-            let opts = CompileOptions {
-                input_path: path,
-                check_only: true,
-                dev_mode: false,
-                ..Default::default()
-            };
-
-            // Run the check and print result.
-            match compile_project(opts) {
-                Ok(result) => {
-                    if result.error_count > 0 {
-                        println!("Found {} errors", result.error_count);
-                        exit(1);
-                    } else {
-                        println!("✓ No errors found");
-                    }
-                }
-                Err(e) => {
-                    eprintln!("{}", e);
-                    exit(1);
-                }
-            }
+        Commands::Check { path: _ } => {
+            println!(
+                "wow check is not supported in pure CLI mode. Use mylang.exe directly for checks."
+            );
+            exit(1);
         }
     }
 }
