@@ -68,14 +68,3 @@ Add to CI pipeline:
 - name: Run tests
   run: cargo test --all
 ```
-
-## Test Metrics
-
-Current test count:
-- Lexer: 12 tests
-- Parser: 19 tests
-- Analyzer: 28 tests
-- MIR: 13 tests
-- Codegen: 7 tests
-- Integration: 3 tests
-**Total: 82 unit tests**
