@@ -24,3 +24,9 @@ path = "src/lib.rs"
 [[bin]]
 name = "mylang-dev"
 path = "src/main.rs"  # Keep your dev tool
+
+
+
+[[bin]]
+name = "mylang"
+path = "src/main.rs"  # Keep your dev tool

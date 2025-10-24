@@ -24,7 +24,8 @@ use std::process::{exit, Command};
 #[command(name = "wow")]
 #[command(about = "mylang cli")]
 #[command(version)]
-#[command(long_about = "===============================================================\n\
+#[command(
+    long_about = "===============================================================\n\
     wow CLI - User-facing command-line interface for the mylang language\n\
     \n\
     This CLI provides a simple interface for building, running, and\n\
@@ -37,7 +38,8 @@ use std::process::{exit, Command};
       - `wow check`: Checks for errors without compiling to a binary.\n\
     \n\
     ===============================================================\n\
-    The main CLI struct. Handles parsing of subcommands and arguments.")]
+    The main CLI struct. Handles parsing of subcommands and arguments."
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -89,10 +91,7 @@ fn main() {
         // =========================
         // Build Command
         // =========================
-        Commands::Build {
-            output,
-            keep_ll,
-        } => {
+        Commands::Build { output, keep_ll } => {
             // Set up compilation options for building.
             let opts = CompileOptions {
                 input_path: PathBuf::from("."),
@@ -127,51 +126,65 @@ fn main() {
             keep_ll,
             args,
         } => {
-            // Use a temporary output name for the binary.
-            let temp = ".output";
-            let opts = CompileOptions {
-                input_path: path,
-                output_name: temp.to_string(),
-                dev_mode: false,
-                keep_ll,
-                ..Default::default()
-            };
+            use std::env;
+            use std::path::PathBuf;
 
-            // Compile the project.
-            match compile_project(opts) {
-                Ok(result) => {
-                    if result.error_count > 0 {
-                        eprintln!("Compilation failed with {} errors", result.error_count);
+            fn find_mylang_exe() -> Option<PathBuf> {
+                // 1. Try same directory as wow.exe
+                if let Ok(current_exe) = env::current_exe() {
+                    if let Some(dir) = current_exe.parent() {
+                        let candidate = dir.join(if cfg!(windows) {
+                            "mylang.exe"
+                        } else {
+                            "mylang"
+                        });
+                        if candidate.exists() {
+                            return Some(candidate);
+                        }
+                    }
+                }
+                // 2. Try PATH
+                if let Ok(paths) = env::var("PATH") {
+                    for path in env::split_paths(&paths) {
+                        let candidate = path.join(if cfg!(windows) {
+                            "mylang.exe"
+                        } else {
+                            "mylang"
+                        });
+                        if candidate.exists() {
+                            return Some(candidate);
+                        }
+                    }
+                }
+                None
+            }
+
+            if let Some(mylang_exe) = find_mylang_exe() {
+                // Build arguments for mylang.exe
+                let mut mylang_args = vec![path.to_string_lossy().to_string()];
+                // Pass --keep-ll if requested
+                if keep_ll {
+                    mylang_args.push("--keep-ll".to_string());
+                }
+                // Pass any additional args
+                mylang_args.extend(args);
+
+                // Call mylang.exe as a subprocess
+                let status = Command::new(mylang_exe).args(&mylang_args).status();
+
+                match status {
+                    Ok(s) if s.success() => {}
+                    Ok(s) => exit(s.code().unwrap_or(1)),
+                    Err(e) => {
+                        eprintln!("Failed to run mylang.exe: {}", e);
                         exit(1);
                     }
                 }
-                Err(e) => {
-                    eprintln!("{}", e);
-                    exit(1);
-                }
-            }
-
-            // Determine the executable name based on platform.
-            let exe = if cfg!(windows) {
-                format!("{}.exe", temp)
             } else {
-                format!("./{}", temp)
-            };
-
-            // Run the compiled binary, passing any additional arguments.
-            let status = Command::new(&exe).args(&args).status();
-
-            // Clean up the binary after running (script-like experience).
-            let _ = fs::remove_file(&exe);
-
-            // Handle the exit status of the program.
-            match status {
-                Ok(s) if s.success() => {}
-                Ok(s) => exit(s.code().unwrap_or(1)),
-                Err(e) => {
-                    eprintln!("Failed to run: {}", e);
-                    exit(1);
-                }
+                eprintln!("PATH: {:?}", std::env::var("PATH"));
+                eprintln!("Current exe: {:?}", std::env::current_exe());
+                eprintln!("Error: Could not find mylang executable. Please ensure mylang.exe is in the same directory as wow.exe or in your PATH.");
+                exit(1);
             }
         }
 
