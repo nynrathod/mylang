@@ -478,8 +478,36 @@ fn link_object_file(obj_file: &str, output: &str, dev_mode: bool) -> Result<(), 
             Err(e) => Err(format!("Failed to run linker: {}", e)),
         }
     } else {
-        // macOS and Linux
-        let status = Command::new(&embedded_linker)
+        // // Linux/macOS
+        // let mut cmd = Command::new(&embedded_linker);
+
+        // #[cfg(target_os = "linux")]
+        // {
+        //     cmd.arg("-flavor").arg("gnu");
+        //     cmd.arg("-L/usr/lib/x86_64-linux-gnu");
+        //     cmd.arg("-L/lib/x86_64-linux-gnu");
+        //     cmd.arg("-L/usr/lib");
+        //     cmd.arg("-dynamic-linker")
+        //         .arg("/lib64/ld-linux-x86-64.so.2");
+
+        //     // Add C runtime startup files
+        //     cmd.arg("/usr/lib/x86_64-linux-gnu/crt1.o");
+        //     cmd.arg("/usr/lib/x86_64-linux-gnu/crti.o");
+        //     cmd.arg("-lc");
+        //     cmd.arg("/usr/lib/x86_64-linux-gnu/crtn.o");
+        // }
+
+        // cmd.arg("-o").arg(output).arg(obj_file);
+
+        // let status = cmd.status();
+        // match status {
+        //     Ok(s) if s.success() => Ok(()),
+        //     Ok(s) => Err(format!("Linking failed: {:?}", s.code())),
+        //     Err(e) => Err(format!("Linker error: {}", e)),
+        // }
+
+        // Use clang wrapper (easier, handles all startup code)
+        let status = Command::new("clang")
             .arg(obj_file)
             .arg("-o")
             .arg(output)
@@ -487,8 +515,8 @@ fn link_object_file(obj_file: &str, output: &str, dev_mode: bool) -> Result<(), 
 
         match status {
             Ok(s) if s.success() => Ok(()),
-            Ok(s) => Err(format!("Linking failed with status: {:?}", s.code())),
-            Err(e) => Err(format!("Failed to run linker: {}", e)),
+            Ok(s) => Err(format!("Linking failed: {:?}", s.code())),
+            Err(e) => Err(format!("Install clang: sudo apt install clang")),
         }
     }
 }
