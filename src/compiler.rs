@@ -18,8 +18,61 @@ use regex::Regex;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+// Embed linker binaries at compile time
+#[cfg(target_os = "windows")]
+const EMBEDDED_LINKER: &[u8] = include_bytes!("../linkers/lld-link.exe");
+
+#[cfg(target_os = "linux")]
+const EMBEDDED_LINKER: &[u8] = include_bytes!("../linkers/ld.lld");
+
+#[cfg(target_os = "macos")]
+const EMBEDDED_LINKER: &[u8] = include_bytes!("../linkers/ld64.lld");
+
+/// Extracts the embedded linker to a temp location and returns its path
+fn extract_embedded_linker() -> Result<PathBuf, String> {
+    let temp_dir = env::temp_dir();
+
+    #[cfg(target_os = "windows")]
+    let linker_name = "lld-link.exe";
+
+    #[cfg(target_os = "linux")]
+    let linker_name = "ld.lld";
+
+    #[cfg(target_os = "macos")]
+    let linker_name = "ld64.lld";
+
+    let linker_path = temp_dir.join(format!("mylang_{}", linker_name));
+
+    // Only write if doesn't exist or size is different (updated version)
+    let should_write = if linker_path.exists() {
+        fs::metadata(&linker_path)
+            .map(|m| m.len() != EMBEDDED_LINKER.len() as u64)
+            .unwrap_or(true)
+    } else {
+        true
+    };
+
+    if should_write {
+        let mut file = fs::File::create(&linker_path)
+            .map_err(|e| format!("Failed to create linker file: {}", e))?;
+        file.write_all(EMBEDDED_LINKER)
+            .map_err(|e| format!("Failed to write linker: {}", e))?;
+
+        // Make executable on Unix
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&linker_path, fs::Permissions::from_mode(0o755))
+                .map_err(|e| format!("Failed to set linker permissions: {}", e))?;
+        }
+    }
+
+    Ok(linker_path)
+}
 
 /// Options for controlling the compilation process.
 /// These are set by the CLI and control input/output, debug, and build mode.
@@ -75,6 +128,16 @@ pub struct CompileResult {
 /// 5. Links to a native executable using the system linker (clang/gcc/lld-link)
 /// Returns a CompileResult indicating success or error count.
 pub fn compile_project(opts: CompileOptions) -> Result<CompileResult, String> {
+    // Check for environment variable overrides from wow CLI
+    let output_name = env::var("MYLANG_OUTPUT_NAME").unwrap_or(opts.output_name);
+    let check_only = env::var("MYLANG_CHECK_ONLY").is_ok() || opts.check_only;
+
+    let opts = CompileOptions {
+        output_name,
+        check_only,
+        ..opts
+    };
+
     // === 1. Find and load main.my ===
     let input_path = if opts.input_path.is_file() {
         opts.input_path.clone()
@@ -242,9 +305,7 @@ pub fn compile_project(opts: CompileOptions) -> Result<CompileResult, String> {
 
     // Abort if errors found
     if error_count > 0 {
-        if opts.dev_mode {
-            println!("\nFound {} errors, skipping codegen", error_count);
-        }
+        if opts.dev_mode {}
         return Ok(CompileResult {
             success: false,
             error_count,
@@ -265,17 +326,13 @@ pub fn compile_project(opts: CompileOptions) -> Result<CompileResult, String> {
     let mut all_nodes = analyzer.imported_functions.clone();
     all_nodes.extend(statements);
 
-    if opts.print_ast {
-        println!("\n=== AST ===\n{:#?}", AstNode::Program(all_nodes.clone()));
-    }
+    if opts.print_ast {}
 
     let mut mir_builder = MirBuilder::new();
     mir_builder.build_program(&all_nodes);
     mir_builder.finalize();
 
-    if opts.print_mir || opts.dev_mode {
-        println!("\n=== MIR ===\n{:#?}", mir_builder.program);
-    }
+    if opts.print_mir || opts.dev_mode {}
 
     // === 6. Generate LLVM IR and emit object file ===
     let context = inkwell::context::Context::create();
@@ -283,7 +340,6 @@ pub fn compile_project(opts: CompileOptions) -> Result<CompileResult, String> {
     codegen.generate_program(&mir_builder.program);
 
     if opts.dev_mode {
-        println!("\n=== LLVM IR ===");
         codegen.dump();
     }
 
@@ -311,28 +367,12 @@ pub fn compile_project(opts: CompileOptions) -> Result<CompileResult, String> {
 
     // After linking, check if exe exists
     if !exe_path.exists() {
-        println!(
-            "Error: Expected executable not found at {}",
-            exe_path.display()
-        );
-        println!("Directory listing for {}:", current_dir.display());
-        match std::fs::read_dir(&current_dir) {
-            Ok(entries) => {
-                for entry in entries {
-                    if let Ok(entry) = entry {
-                        println!("  {}", entry.path().display());
-                    }
-                }
-            }
-            Err(e) => println!("  Failed to read directory: {}", e),
-        }
         return Ok(CompileResult {
             success: false,
             error_count: 0,
             exe_path: None,
         });
     } else {
-        println!("✓ Executable created at {}", exe_path.display());
     }
 
     Ok(CompileResult {
@@ -376,8 +416,6 @@ fn compile_to_native(
         .write_to_file(&codegen.module, FileType::Object, Path::new(&obj_file))
         .map_err(|e| format!("Failed to write object file: {}", e))?;
 
-    println!("✓ Object file created: {}", obj_file);
-
     // 3. Link object file to native executable
     let exe_name = exe_path.to_str().unwrap();
 
@@ -396,134 +434,62 @@ fn compile_to_native(
 /// - On macOS/Linux: uses clang as the linker (adds C runtime, startup code)
 /// Returns Ok(()) on success, or an error string on failure.
 fn link_object_file(obj_file: &str, output: &str, dev_mode: bool) -> Result<(), String> {
+    // Always use embedded linker for all platforms
+    let embedded_linker = extract_embedded_linker()?;
+
     if cfg!(target_os = "windows") {
-        // Strategy 1: Try clang first (simplest and most portable)
-        if Command::new("clang").arg("--version").output().is_ok() {
-            println!("Using clang as linker...");
-            let status = Command::new("clang")
-                .arg(obj_file)
-                .arg("-o")
-                .arg(output)
-                .arg("-Wl,/subsystem:console")
-                .status();
+        let sdk_paths = find_windows_sdk_paths();
 
-            match status {
-                Ok(s) if s.success() => {
-                    println!("✓ Linked successfully with clang");
-                    return Ok(());
-                }
-                Ok(s) => {
-                    println!("clang linking failed with status: {:?}", s.code());
-                }
-                Err(e) => {
-                    println!("Failed to run clang: {}", e);
-                }
+        let mut cmd = Command::new(&embedded_linker);
+        cmd.arg(format!("/OUT:{}", output))
+            .arg(obj_file)
+            .arg("/SUBSYSTEM:CONSOLE")
+            .arg("/ENTRY:main");
+
+        if let Some(paths) = sdk_paths {
+            if let Some(ucrt) = paths.ucrt_lib {
+                cmd.arg(format!("/LIBPATH:{}", ucrt));
             }
+            if let Some(um) = paths.um_lib {
+                cmd.arg(format!("/LIBPATH:{}", um));
+            }
+            if let Some(msvc) = paths.msvc_lib {
+                cmd.arg(format!("/LIBPATH:{}", msvc));
+            }
+            cmd.arg("ucrt.lib")
+                .arg("vcruntime.lib")
+                .arg("legacy_stdio_definitions.lib");
         }
 
-        // Strategy 2: Try lld-link with auto-detected Windows SDK paths
-        if Command::new("lld-link").arg("--version").output().is_ok() {
-            println!("Using lld-link as linker...");
+        let output_result = cmd.output();
+        match output_result {
+            Ok(result) => {
+                if dev_mode {}
 
-            // Try to find Windows SDK and MSVC paths
-            let sdk_paths = find_windows_sdk_paths();
-
-            let mut cmd = Command::new("lld-link");
-            cmd.arg(format!("/OUT:{}", output))
-                .arg(obj_file)
-                .arg("/SUBSYSTEM:CONSOLE")
-                .arg("/ENTRY:main");
-
-            // Add library paths if found
-            if let Some(paths) = sdk_paths {
-                if let Some(ucrt) = paths.ucrt_lib {
-                    cmd.arg(format!("/LIBPATH:{}", ucrt));
-                }
-                if let Some(um) = paths.um_lib {
-                    cmd.arg(format!("/LIBPATH:{}", um));
-                }
-                if let Some(msvc) = paths.msvc_lib {
-                    cmd.arg(format!("/LIBPATH:{}", msvc));
-                }
-
-                // Add required libraries
-                cmd.arg("ucrt.lib")
-                    .arg("vcruntime.lib")
-                    .arg("legacy_stdio_definitions.lib");
-            }
-
-            let output_result = cmd.output();
-            match output_result {
-                Ok(result) => {
-                    if dev_mode {
-                        println!("Linker stdout: {}", String::from_utf8_lossy(&result.stdout));
-                        println!("Linker stderr: {}", String::from_utf8_lossy(&result.stderr));
-                    }
-
-                    if result.status.success() {
-                        println!("✓ Linked successfully with lld-link");
-                        return Ok(());
-                    } else {
-                        println!("lld-link failed with status: {:?}", result.status.code());
-                    }
-                }
-                Err(e) => {
-                    println!("Failed to run lld-link: {}", e);
+                if result.status.success() {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "Linking failed. On Windows, you need Visual Studio Build Tools or Windows SDK.\n\
+                        Download from: https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022"
+                    ))
                 }
             }
+            Err(e) => Err(format!("Failed to run linker: {}", e)),
         }
+    } else {
+        // macOS and Linux
+        let status = Command::new(&embedded_linker)
+            .arg(obj_file)
+            .arg("-o")
+            .arg(output)
+            .status();
 
-        // Strategy 3: Fallback to MSVC link.exe
-        if Command::new("link").arg("/?").output().is_ok() {
-            println!("Using MSVC link.exe as linker...");
-            let status = Command::new("link")
-                .arg(format!("/OUT:{}", output))
-                .arg(obj_file)
-                .arg("/SUBSYSTEM:CONSOLE")
-                .arg("/DEFAULTLIB:ucrt.lib")
-                .arg("/DEFAULTLIB:vcruntime.lib")
-                .arg("/ENTRY:mainCRTStartup")
-                .status();
-
-            match status {
-                Ok(s) if s.success() => {
-                    println!("✓ Linked successfully with MSVC link.exe");
-                    return Ok(());
-                }
-                Ok(s) => {
-                    return Err(format!("MSVC link.exe failed with status: {:?}", s.code()));
-                }
-                Err(e) => {
-                    return Err(format!("Failed to run MSVC link.exe: {}", e));
-                }
-            }
+        match status {
+            Ok(s) if s.success() => Ok(()),
+            Ok(s) => Err(format!("Linking failed with status: {:?}", s.code())),
+            Err(e) => Err(format!("Failed to run linker: {}", e)),
         }
-
-        return Err("No suitable linker found. Please install one of:\n\
-             1. Clang/LLVM (recommended): https://releases.llvm.org/\n\
-             2. Visual Studio Build Tools with C++ support\n\
-             3. Windows SDK"
-            .to_string());
-    }
-
-    // macOS and Linux: use clang as linker
-    println!("Using clang as linker...");
-    let status = Command::new("clang")
-        .arg(obj_file)
-        .arg("-o")
-        .arg(output)
-        .status();
-
-    match status {
-        Ok(s) if s.success() => {
-            println!("✓ Linked successfully with clang");
-            Ok(())
-        }
-        Ok(s) => Err(format!("clang linking failed with status: {:?}", s.code())),
-        Err(e) => Err(format!(
-            "Failed to run clang: {}. Please install clang (e.g., 'apt install clang' or 'brew install llvm')",
-            e
-        )),
     }
 }
 
