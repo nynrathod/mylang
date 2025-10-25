@@ -1,7 +1,4 @@
-// This file contains the main compilation pipeline for the wow CLI.
-// It parses, analyzes, generates LLVM IR, emits an object file, and links
-// to a native executable using the system linker (clang/gcc/lld-link).
-// No clang or Rust is needed for end users to run the final binary.
+// Hybrid linking: Embedded LLD for Windows, Clang for Unix
 
 use crate::analyzer::types::SemanticError;
 use crate::analyzer::SemanticAnalyzer;
@@ -22,32 +19,15 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-// Embed linker binaries at compile time
+// Embed linker for Windows only
 #[cfg(target_os = "windows")]
 const EMBEDDED_LINKER: &[u8] = include_bytes!("../linkers/lld-link.exe");
 
-#[cfg(target_os = "linux")]
-const EMBEDDED_LINKER: &[u8] = include_bytes!("../linkers/ld.lld");
-
-#[cfg(target_os = "macos")]
-const EMBEDDED_LINKER: &[u8] = include_bytes!("../linkers/ld64.lld");
-
-/// Extracts the embedded linker to a temp location and returns its path
+#[cfg(target_os = "windows")]
 fn extract_embedded_linker() -> Result<PathBuf, String> {
     let temp_dir = env::temp_dir();
+    let linker_path = temp_dir.join("mylang_lld-link.exe");
 
-    #[cfg(target_os = "windows")]
-    let linker_name = "lld-link.exe";
-
-    #[cfg(target_os = "linux")]
-    let linker_name = "ld.lld";
-
-    #[cfg(target_os = "macos")]
-    let linker_name = "ld64.lld";
-
-    let linker_path = temp_dir.join(format!("mylang_{}", linker_name));
-
-    // Only write if doesn't exist or size is different (updated version)
     let should_write = if linker_path.exists() {
         fs::metadata(&linker_path)
             .map(|m| m.len() != EMBEDDED_LINKER.len() as u64)
@@ -61,42 +41,23 @@ fn extract_embedded_linker() -> Result<PathBuf, String> {
             .map_err(|e| format!("Failed to create linker file: {}", e))?;
         file.write_all(EMBEDDED_LINKER)
             .map_err(|e| format!("Failed to write linker: {}", e))?;
-
-        // Make executable on Unix
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&linker_path, fs::Permissions::from_mode(0o755))
-                .map_err(|e| format!("Failed to set linker permissions: {}", e))?;
-        }
     }
 
     Ok(linker_path)
 }
 
-/// Options for controlling the compilation process.
-/// These are set by the CLI and control input/output, debug, and build mode.
 pub struct CompileOptions {
-    /// Path to the user's project or main.my file
     pub input_path: PathBuf,
-    /// Name of the output binary (no extension)
     pub output_name: String,
-    /// Enable developer mode (prints extra debug info)
     pub dev_mode: bool,
-    /// Print the AST after parsing
     pub print_ast: bool,
-    /// Print the MIR after lowering
     pub print_mir: bool,
-    /// Keep the generated LLVM IR (.ll) file
     pub keep_ll: bool,
-    /// Keep the generated object (.o) file
     pub keep_obj: bool,
-    /// Only check for errors, do not build
     pub check_only: bool,
 }
 
 impl Default for CompileOptions {
-    /// Provides default options for compilation.
     fn default() -> Self {
         Self {
             input_path: PathBuf::from("."),
@@ -111,24 +72,13 @@ impl Default for CompileOptions {
     }
 }
 
-/// Result of a compilation, including success and error count.
 pub struct CompileResult {
     pub success: bool,
     pub error_count: usize,
-    /// Path to the generated executable (if successful)
     pub exe_path: Option<PathBuf>,
 }
 
-/// The main entry point for compiling a user project.
-/// This function orchestrates the entire pipeline:
-/// 1. Loads and parses the user's source file
-/// 2. Performs semantic analysis and error checking
-/// 3. Lowers to MIR (mid-level IR)
-/// 4. Generates LLVM IR and emits an object file
-/// 5. Links to a native executable using the system linker (clang/gcc/lld-link)
-/// Returns a CompileResult indicating success or error count.
 pub fn compile_project(opts: CompileOptions) -> Result<CompileResult, String> {
-    // Check for environment variable overrides from wow CLI
     let output_name = env::var("MYLANG_OUTPUT_NAME").unwrap_or(opts.output_name);
     let check_only = env::var("MYLANG_CHECK_ONLY").is_ok() || opts.check_only;
 
@@ -138,7 +88,6 @@ pub fn compile_project(opts: CompileOptions) -> Result<CompileResult, String> {
         ..opts
     };
 
-    // === 1. Find and load main.my ===
     let input_path = if opts.input_path.is_file() {
         opts.input_path.clone()
     } else {
@@ -152,13 +101,11 @@ pub fn compile_project(opts: CompileOptions) -> Result<CompileResult, String> {
         main_file
     };
 
-    // === 2. Read source code ===
     let input = fs::read_to_string(&input_path)
         .map_err(|e| format!("Failed to read {}: {}", input_path.display(), e))?;
 
     let project_root = input_path.parent().unwrap().to_path_buf();
 
-    // === 3. Lexing and Parsing ===
     let tokens = lex(&input);
     let mut parser = Parser::new(&tokens);
     let mut analyzer = SemanticAnalyzer::new(Some(project_root.clone()));
@@ -167,7 +114,6 @@ pub fn compile_project(opts: CompileOptions) -> Result<CompileResult, String> {
     let mut error_count = 0;
     let mut sources = HashMap::new();
 
-    // Parse statements from tokens
     let mut statements = Vec::new();
     while parser.current < parser.tokens.len() {
         match parser.parse_statement() {
@@ -192,16 +138,11 @@ pub fn compile_project(opts: CompileOptions) -> Result<CompileResult, String> {
         }
     }
 
-    // === 4. Semantic Analysis ===
-    // Create a fresh analyzer for semantic analysis
     let mut analyzer = SemanticAnalyzer::new(Some(project_root.clone()));
 
     if let Err(e) = analyzer.analyze_program(&mut statements) {
-        use crate::analyzer::types::SemanticError;
         match &e {
             SemanticError::ParseErrorInModule { file, error } => {
-                // Use regex to extract line, col, and message from error string like:
-                // "parse error at 6:7: Expected OpenParen, got Semi (";")"
                 let re = Regex::new(r"at (\d+):(\d+): (.+)").unwrap();
                 let (line, col, msg) = if let Some(caps) = re.captures(error) {
                     (
@@ -221,7 +162,6 @@ pub fn compile_project(opts: CompileOptions) -> Result<CompileResult, String> {
                     col,
                     is_parse: true,
                 });
-                // Try to load the imported file source for snippet display
                 if !sources.contains_key(file) {
                     if let Ok(src) = std::fs::read_to_string(file) {
                         sources.insert(file.clone(), src);
@@ -242,7 +182,6 @@ pub fn compile_project(opts: CompileOptions) -> Result<CompileResult, String> {
         }
     }
 
-    // Also check for any additional errors collected by the analyzer
     for error in &analyzer.collected_errors {
         match error {
             SemanticError::ParseErrorInModule {
@@ -288,11 +227,8 @@ pub fn compile_project(opts: CompileOptions) -> Result<CompileResult, String> {
         }
     }
 
-    // Print diagnostics if any errors found
     if !diagnostics.is_empty() {
-        // Always include main file source
         sources.insert(input_path.display().to_string(), input.clone());
-        // Also try to load sources for any other files in diagnostics
         for diag in &diagnostics {
             if !sources.contains_key(&diag.filename) {
                 if let Ok(src) = std::fs::read_to_string(&diag.filename) {
@@ -303,7 +239,6 @@ pub fn compile_project(opts: CompileOptions) -> Result<CompileResult, String> {
         print_grouped(&diagnostics, &sources);
     }
 
-    // Abort if errors found
     if error_count > 0 {
         if opts.dev_mode {}
         return Ok(CompileResult {
@@ -313,7 +248,6 @@ pub fn compile_project(opts: CompileOptions) -> Result<CompileResult, String> {
         });
     }
 
-    // Only check mode: skip codegen
     if opts.check_only {
         return Ok(CompileResult {
             success: error_count == 0,
@@ -322,7 +256,6 @@ pub fn compile_project(opts: CompileOptions) -> Result<CompileResult, String> {
         });
     }
 
-    // === 5. Lower to MIR (Mid-level IR) ===
     let mut all_nodes = analyzer.imported_functions.clone();
     all_nodes.extend(statements);
 
@@ -334,7 +267,6 @@ pub fn compile_project(opts: CompileOptions) -> Result<CompileResult, String> {
 
     if opts.print_mir || opts.dev_mode {}
 
-    // === 6. Generate LLVM IR and emit object file ===
     let context = inkwell::context::Context::create();
     let mut codegen = CodeGen::new("main_module", &context);
     codegen.generate_program(&mir_builder.program);
@@ -343,7 +275,6 @@ pub fn compile_project(opts: CompileOptions) -> Result<CompileResult, String> {
         codegen.dump();
     }
 
-    // Only save .ll file if keep_ll is true (not just dev_mode)
     if opts.keep_ll {
         let llvm_ir = codegen.module.print_to_string();
         let ll_file = format!("{}.ll", opts.output_name);
@@ -351,8 +282,6 @@ pub fn compile_project(opts: CompileOptions) -> Result<CompileResult, String> {
             .map_err(|e| format!("Failed to write LLVM IR: {}", e))?;
     }
 
-    // === 7. Native compilation and linking ===
-    // Use current directory for output (where the command is run from)
     let current_dir =
         env::current_dir().map_err(|e| format!("Failed to get current directory: {}", e))?;
 
@@ -365,7 +294,6 @@ pub fn compile_project(opts: CompileOptions) -> Result<CompileResult, String> {
 
     compile_to_native(&codegen, &opts, &exe_path)?;
 
-    // After linking, check if exe exists
     if !exe_path.exists() {
         return Ok(CompileResult {
             success: false,
@@ -382,15 +310,11 @@ pub fn compile_project(opts: CompileOptions) -> Result<CompileResult, String> {
     })
 }
 
-/// Compiles LLVM IR to a native object file and links it to a native executable.
-/// Uses the system linker (clang/gcc/lld-link) for portability.
-/// Cleans up the object file unless keep_obj is set.
 fn compile_to_native(
     codegen: &CodeGen,
     opts: &CompileOptions,
     exe_path: &Path,
 ) -> Result<(), String> {
-    // 1. Initialize the native target for codegen
     Target::initialize_native(&InitializationConfig::default())
         .map_err(|e| format!("Failed to initialize target: {}", e))?;
 
@@ -401,27 +325,24 @@ fn compile_to_native(
     let target =
         Target::from_triple(&triple).map_err(|e| format!("Failed to create target: {}", e))?;
 
-    let opt_level = OptimizationLevel::Aggressive;
-
-    let reloc = RelocMode::PIC;
-    let model = CodeModel::Default;
-
     let target_machine = target
-        .create_target_machine(&triple, &cpu, &features, opt_level, reloc, model)
+        .create_target_machine(
+            &triple,
+            &cpu,
+            &features,
+            OptimizationLevel::Aggressive,
+            RelocMode::PIC,
+            CodeModel::Default,
+        )
         .ok_or("Failed to create target machine")?;
 
-    // 2. Emit object file to current directory
     let obj_file = format!("{}.o", opts.output_name);
     target_machine
         .write_to_file(&codegen.module, FileType::Object, Path::new(&obj_file))
         .map_err(|e| format!("Failed to write object file: {}", e))?;
 
-    // 3. Link object file to native executable
-    let exe_name = exe_path.to_str().unwrap();
+    link_object_file(&obj_file, exe_path.to_str().unwrap(), opts.dev_mode)?;
 
-    link_object_file(&obj_file, exe_name, opts.dev_mode)?;
-
-    // 4. Clean up object file
     if !opts.keep_obj {
         let _ = fs::remove_file(&obj_file);
     }
@@ -429,18 +350,13 @@ fn compile_to_native(
     Ok(())
 }
 
-/// Links the generated object file to a native executable using the system linker.
-/// - On Windows: tries clang, then lld-link with auto-detected SDK paths, then MSVC link.exe
-/// - On macOS/Linux: uses clang as the linker (adds C runtime, startup code)
-/// Returns Ok(()) on success, or an error string on failure.
 fn link_object_file(obj_file: &str, output: &str, dev_mode: bool) -> Result<(), String> {
-    // Always use embedded linker for all platforms
-    let embedded_linker = extract_embedded_linker()?;
-
-    if cfg!(target_os = "windows") {
+    #[cfg(target_os = "windows")]
+    {
+        let linker = extract_embedded_linker()?;
         let sdk_paths = find_windows_sdk_paths();
 
-        let mut cmd = Command::new(&embedded_linker);
+        let mut cmd = Command::new(&linker);
         cmd.arg(format!("/OUT:{}", output))
             .arg(obj_file)
             .arg("/SUBSYSTEM:CONSOLE")
@@ -461,84 +377,58 @@ fn link_object_file(obj_file: &str, output: &str, dev_mode: bool) -> Result<(), 
                 .arg("legacy_stdio_definitions.lib");
         }
 
-        let output_result = cmd.output();
-        match output_result {
-            Ok(result) => {
-                if dev_mode {}
-
-                if result.status.success() {
-                    Ok(())
-                } else {
-                    Err(format!(
-                        "Linking failed. On Windows, you need Visual Studio Build Tools or Windows SDK.\n\
-                        Download from: https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022"
-                    ))
-                }
-            }
-            Err(e) => Err(format!("Failed to run linker: {}", e)),
+        let result = cmd.output();
+        match result {
+            Ok(r) if r.status.success() => Ok(()),
+            _ => Err("Linking failed. Install Visual Studio Build Tools:\n\
+                https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022"
+                .to_string()),
         }
-    } else {
-        // // Linux/macOS
-        // let mut cmd = Command::new(&embedded_linker);
+    }
 
-        // #[cfg(target_os = "linux")]
-        // {
-        //     cmd.arg("-flavor").arg("gnu");
-        //     cmd.arg("-L/usr/lib/x86_64-linux-gnu");
-        //     cmd.arg("-L/lib/x86_64-linux-gnu");
-        //     cmd.arg("-L/usr/lib");
-        //     cmd.arg("-dynamic-linker")
-        //         .arg("/lib64/ld-linux-x86-64.so.2");
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Use clang on Unix - simple and reliable
+        let clang_check = Command::new("clang").arg("--version").output();
+        if clang_check.is_err() {
+            return Err("Clang not found. Install with:\n\
+                - Ubuntu/Debian: sudo apt install clang\n\
+                - Fedora: sudo dnf install clang\n\
+                - macOS: xcode-select --install"
+                .to_string());
+        }
 
-        //     // Add C runtime startup files
-        //     cmd.arg("/usr/lib/x86_64-linux-gnu/crt1.o");
-        //     cmd.arg("/usr/lib/x86_64-linux-gnu/crti.o");
-        //     cmd.arg("-lc");
-        //     cmd.arg("/usr/lib/x86_64-linux-gnu/crtn.o");
-        // }
-
-        // cmd.arg("-o").arg(output).arg(obj_file);
-
-        // let status = cmd.status();
-        // match status {
-        //     Ok(s) if s.success() => Ok(()),
-        //     Ok(s) => Err(format!("Linking failed: {:?}", s.code())),
-        //     Err(e) => Err(format!("Linker error: {}", e)),
-        // }
-
-        // Use clang wrapper (easier, handles all startup code)
-        let status = Command::new("clang")
+        let result = Command::new("clang")
             .arg(obj_file)
             .arg("-o")
             .arg(output)
-            .status();
+            .output();
 
-        match status {
-            Ok(s) if s.success() => Ok(()),
-            Ok(s) => Err(format!("Linking failed: {:?}", s.code())),
-            Err(e) => Err(format!("Install clang: sudo apt install clang")),
+        match result {
+            Ok(r) if r.status.success() => Ok(()),
+            Ok(r) => Err(format!(
+                "Linking failed:\n{}",
+                String::from_utf8_lossy(&r.stderr)
+            )),
+            Err(e) => Err(format!("Linker error: {}", e)),
         }
     }
 }
 
-/// Windows SDK path information
+#[cfg(target_os = "windows")]
 struct WindowsSdkPaths {
     ucrt_lib: Option<String>,
     um_lib: Option<String>,
     msvc_lib: Option<String>,
 }
 
-/// Attempts to auto-detect Windows SDK and MSVC library paths
+#[cfg(target_os = "windows")]
 fn find_windows_sdk_paths() -> Option<WindowsSdkPaths> {
-    // Try to find paths using common environment variables and locations
     let program_files_x86 = env::var("ProgramFiles(x86)").ok()?;
-
-    // Try to find Windows Kits path
     let kits_base = format!("{}\\Windows Kits\\10\\Lib", program_files_x86);
     let kits_path = Path::new(&kits_base);
 
     let ucrt_lib = if kits_path.exists() {
-        // Find the latest SDK version
         if let Ok(entries) = fs::read_dir(kits_path) {
             let mut versions: Vec<String> = entries
                 .filter_map(|e| e.ok())
@@ -558,16 +448,8 @@ fn find_windows_sdk_paths() -> Option<WindowsSdkPaths> {
 
     let um_lib = ucrt_lib.as_ref().map(|u| u.replace("ucrt", "um"));
 
-    // Try to find MSVC path
     let msvc_base = format!("{}\\Microsoft Visual Studio", program_files_x86);
-    let msvc_path = Path::new(&msvc_base);
-
-    let msvc_lib = if msvc_path.exists() {
-        // Look for Build Tools or any VS version
-        find_msvc_lib_path(&msvc_base)
-    } else {
-        None
-    };
+    let msvc_lib = find_msvc_lib_path(&msvc_base);
 
     Some(WindowsSdkPaths {
         ucrt_lib,
@@ -576,11 +458,9 @@ fn find_windows_sdk_paths() -> Option<WindowsSdkPaths> {
     })
 }
 
-/// Helper to recursively find MSVC lib path
+#[cfg(target_os = "windows")]
 fn find_msvc_lib_path(base: &str) -> Option<String> {
     let base_path = Path::new(base);
-
-    // Try common paths
     for year in &["2022", "2019", "2017"] {
         for edition in &["BuildTools", "Community", "Professional", "Enterprise"] {
             let vc_path = base_path.join(year).join(edition).join("VC\\Tools\\MSVC");
@@ -599,8 +479,6 @@ fn find_msvc_lib_path(base: &str) -> Option<String> {
     None
 }
 
-/// Helper to skip to the next statement after a parse error.
-/// Advances the parser until the next semicolon or end of file.
 fn skip_to_next_statement(parser: &mut Parser) {
     while parser.current < parser.tokens.len() {
         if let Some(tok) = parser.peek() {

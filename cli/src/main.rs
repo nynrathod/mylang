@@ -89,11 +89,13 @@ fn main() {
 
             // Generate unique temp binary name
             let temp_name = format!("temp_mylang_{}", std::process::id());
+            let temp_obj_name = format!("{}.o", temp_name);
 
-            // Compile to temp binary
+            // Compile to temp binary, pass temp object name as env var
             let mut cmd = Command::new(&mylang_exe);
             cmd.arg(path.to_string_lossy().to_string())
                 .env("MYLANG_OUTPUT_NAME", &temp_name)
+                .env("MYLANG_OBJ_NAME", &temp_obj_name)
                 .env("WOW_RUNNING", "1");
 
             if keep_ll {
