@@ -102,6 +102,7 @@ git checkout -b fix/bug-description
 # Run all tests
 cargo test or  cargo nextest run
 ```
+See [Testing_guide.md](./Testing_guide.md) for more details on running and writing tests.
 
 ### 5. Commit and Push
 ### 6. Create a Pull Request
