@@ -23,7 +23,7 @@ Doo is a statically-typed, compiled programming language with a Rust-inspired sy
 
 **Download the latest `doo` binary from the [Releases](https://github.com/nynrathod/doolang/releases) page as per your operating system.**
 
-your downloaded file will usually be saved in your Downloads folder
+Your downloaded file will usually be saved in your Downloads folder. Please rename file(you will get in format doo-[os-name]-x.x.x) to **doo**, in windows keep .exe at end
 
 Then, follow the steps below for your operating system:
 
