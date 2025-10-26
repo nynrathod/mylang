@@ -1,12 +1,11 @@
 [workspace]
-members = ["cli"]
 resolver = "2"
 
 [package]
-name = "mylang"
+name = "doo"
 version = "0.1.0"
 edition = "2021"
-default-run = "mylang-dev"
+default-run = "doo-dev"
 
 [dependencies]
 inkwell = { version = "0.6.0", features = ["llvm18-1"] }
@@ -25,15 +24,15 @@ strip = true           # Strip symbols
 panic = "abort"        # Smaller panic handler
 
 [lib]
-name = "mylang"
+name = "doo"
 path = "src/lib.rs"
 
 [[bin]]
-name = "mylang-dev"
+name = "doo-dev"
 path = "src/main.rs"  # Keep your dev tool
 
 
 
 [[bin]]
-name = "mylang"
+name = "doo"
 path = "src/main.rs"  # Keep your dev tool

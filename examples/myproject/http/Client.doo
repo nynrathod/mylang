@@ -24,7 +24,7 @@ fn FetchuserTw(id: Int) -> Str {
     print("Scores:", scores1);
 
     // String operations
-    let name1: Str = "MyLang";
+    let name1: Str = "Doo";
     let greeting1 = "Hello, " + name1 + "!";
 
     print(greeting1);

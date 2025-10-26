@@ -26,7 +26,7 @@ const EMBEDDED_LINKER: &[u8] = include_bytes!("../linkers/lld-link.exe");
 #[cfg(target_os = "windows")]
 fn extract_embedded_linker() -> Result<PathBuf, String> {
     let temp_dir = env::temp_dir();
-    let linker_path = temp_dir.join("mylang_lld-link.exe");
+    let linker_path = temp_dir.join("doo_lld-link.exe");
 
     let should_write = if linker_path.exists() {
         fs::metadata(&linker_path)
@@ -79,8 +79,8 @@ pub struct CompileResult {
 }
 
 pub fn compile_project(opts: CompileOptions) -> Result<CompileResult, String> {
-    let output_name = env::var("MYLANG_OUTPUT_NAME").unwrap_or(opts.output_name);
-    let check_only = env::var("MYLANG_CHECK_ONLY").is_ok() || opts.check_only;
+    let output_name = env::var("DOO_OUTPUT_NAME").unwrap_or(opts.output_name);
+    let check_only = env::var("DOO_CHECK_ONLY").is_ok() || opts.check_only;
 
     let opts = CompileOptions {
         output_name,
@@ -91,10 +91,10 @@ pub fn compile_project(opts: CompileOptions) -> Result<CompileResult, String> {
     let input_path = if opts.input_path.is_file() {
         opts.input_path.clone()
     } else {
-        let main_file = opts.input_path.join("main.my");
+        let main_file = opts.input_path.join("main.doo");
         if !main_file.exists() {
             return Err(format!(
-                "Error: main.my not found in {}",
+                "Error: main.doo not found in {}",
                 opts.input_path.display()
             ));
         }

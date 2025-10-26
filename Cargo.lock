@@ -124,6 +124,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
 
 [[package]]
+name = "doo"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "inkwell",
+ "llvm-sys",
+ "regex",
+]
+
+[[package]]
 name = "either"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -203,16 +213,6 @@ name = "memchr"
 version = "2.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f52b00d39961fc5b2736ea853c9cc86238e165017a493d1d5c8eac6bdc4cc273"
-
-[[package]]
-name = "mylang"
-version = "0.1.0"
-dependencies = [
- "clap",
- "inkwell",
- "llvm-sys",
- "regex",
-]
 
 [[package]]
 name = "once_cell"
@@ -419,10 +419,3 @@ name = "windows_x86_64_msvc"
 version = "0.53.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6bbff5f0aada427a1e5a6da5f1f98158182f26556f345ac9e04d36d0ebed650"
-
-[[package]]
-name = "wow"
-version = "0.1.0"
-dependencies = [
- "clap",
-]

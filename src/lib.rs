@@ -1,4 +1,4 @@
-// MyLang Compiler Library
+// Doo Compiler Library
 // Exports all compiler modules for testing and external use
 
 pub mod analyzer;

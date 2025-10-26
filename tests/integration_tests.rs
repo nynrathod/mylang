@@ -1,8 +1,8 @@
-use mylang::analyzer::SemanticAnalyzer;
-use mylang::codegen::core::CodeGen;
-use mylang::lexar::lexer::lex;
-use mylang::mir::builder::MirBuilder;
-use mylang::parser::Parser;
+use doo::analyzer::SemanticAnalyzer;
+use doo::codegen::core::CodeGen;
+use doo::lexar::lexer::lex;
+use doo::mir::builder::MirBuilder;
+use doo::parser::Parser;
 use inkwell::context::Context;
 
 fn compile_full_pipeline(input: &str) -> Result<String, String> {
@@ -13,8 +13,10 @@ fn compile_full_pipeline(input: &str) -> Result<String, String> {
     match result {
         Ok(mut ast) => {
             let mut analyzer = SemanticAnalyzer::new(None);
-            if let mylang::parser::ast::AstNode::Program(ref mut nodes) = ast {
-                analyzer.analyze_program(nodes).map_err(|e| format!("{:?}", e))?;
+            if let doo::parser::ast::AstNode::Program(ref mut nodes) = ast {
+                analyzer
+                    .analyze_program(nodes)
+                    .map_err(|e| format!("{:?}", e))?;
 
                 let mut mir_builder = MirBuilder::new();
                 mir_builder.build_program(nodes);

@@ -76,9 +76,10 @@ impl SemanticAnalyzer {
                 } => {
                     // Check if function already defined
                     if self.function_table.contains_key(name) {
-                        self.collected_errors.push(SemanticError::FunctionRedeclaration(NamedError {
-                            name: name.to_string(),
-                        }));
+                        self.collected_errors
+                            .push(SemanticError::FunctionRedeclaration(NamedError {
+                                name: name.to_string(),
+                            }));
                         continue;
                     }
 
@@ -258,19 +259,19 @@ impl SemanticAnalyzer {
     // Helper to check if currently inside a loop (for break/continue validation)
 
     /// Resolve a module path (e.g., ["http", "Client"]) to a file path
-    /// For import http::Client::Fetchuser, we want http/Client.my
+    /// For import http::Client::Fetchuser, we want http/Client.doo
     /// The last element before the symbol is the file name
     fn resolve_module_path(&self, path: &[String], symbol: &Option<String>) -> Option<PathBuf> {
         let mut buf = self.project_root.clone();
 
-        // For imports like http::Client::Fetchuser, we want http/Client.my
+        // For imports like http::Client::Fetchuser, we want http/Client.doo
         // The path will be ["http", "Client"]
         for part in path {
             buf.push(part);
         }
 
-        // Add .my extension
-        buf.set_extension("my");
+        // Add .doo extension
+        buf.set_extension("doo");
 
         if buf.exists() {
             Some(buf)

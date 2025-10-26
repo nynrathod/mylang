@@ -1,9 +1,9 @@
 ## 📁 Project Structure
 
-This is the **Example folder structure** for a typical mylang project.
+This is the **Example folder structure** for a typical doo project.
 It helps keep your code organized, modular, and easy to maintain.
 
-- **main.my**: Your project entry point.
+- **main.doo**: Your project entry point.
 - **http/**: Example of a feature/module folder (e.g., for HTTP-related code).
 - **models/**: Example of a folder for data models or business logic.
 
@@ -11,31 +11,31 @@ You can add more folders (e.g., `services/`, `utils/`, `tests/`) as your project
 
 ```text
 myproject/
-├── main.my          # Entry point
+├── main.doo          # Entry point
 ├── http/
-│   └── Client.my    # Module: HTTP client logic
+│   └── Client.doo    # Module: HTTP client logic
 └── models/
-    └── User.my      # Module: User-related logic
+    └── User.doo      # Module: User-related logic
 ```
 
 **Notes:**
-- Use PascalCase for file names that define modules with public functions (e.g., `User.my`, `Client.my`).
+- Use PascalCase for file names that define modules with public functions (e.g., `User.doo`, `Client.doo`).
 - Keep all related files for a feature/module in the same folder.
 - Imports should use the folder and PascalCase file name, e.g., `import models::User::Usergreet;`.
 
 
 ```rust
-    // models/User.my
+    // models/User.doo
     fn Usergreet(user: Str) -> Str {
         return "Hello, " + user;
     }
 
-    // http/Client.my
+    // http/Client.doo
     fn Fetchuser(id: Int) -> Str {
         return "Alice";
     }
 
-    // main.my
+    // main.doo
     import http::Client::Fetchuser;
     import models::User::Usergreet;
 

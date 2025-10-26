@@ -1,4 +1,4 @@
-/// Centralized diagnostics and error formatting for mylang.
+/// Centralized diagnostics and error formatting for doo.
 /// Provides colorized output, error code extraction, and source snippet rendering.
 /// Used for both semantic and parse errors, as well as grouped reporting.
 use crate::analyzer::types::SemanticError;
