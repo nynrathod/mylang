@@ -60,11 +60,3 @@ fn test_my_semantic_check() {
     assert!(analyze_code(input).is_ok());
 }
 ```
-
-## Continuous Integration
-
-Add to CI pipeline:
-```yaml
-- name: Run tests
-  run: cargo test --all
-```
