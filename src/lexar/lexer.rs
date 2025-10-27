@@ -125,28 +125,56 @@ pub fn lex(input: &str) -> Vec<Token<'_>> {
             continue;
         }
 
-        // Multi-character operators first
-        // Always check for ..= and .. before handling numbers/floats
-        if i + 3 <= chars.len() && &input[i..i + 3] == "..=" {
-            tokens.push(Token {
-                kind: TokenType::RangeInc, // inclusive
-                value: "..=",
-                line,
-                col,
-            });
-            i += 3;
-            col += 3;
-            continue;
-        } else if i + 2 <= chars.len() && &input[i..i + 2] == ".." {
-            tokens.push(Token {
-                kind: TokenType::RangeExc, // exclusive
-                value: "..",
-                line,
-                col,
-            });
+        // Skip C-style multiline comments /* ... */
+        if c == '/' && i + 1 < chars.len() && chars[i + 1] == '*' {
             i += 2;
             col += 2;
+            // Find closing */
+            while i + 1 < chars.len() && !(chars[i] == '*' && chars[i + 1] == '/') {
+                if chars[i] == '\n' {
+                    line += 1;
+                    col = 1;
+                } else {
+                    col += 1;
+                }
+                i += 1;
+            }
+            if i + 1 < chars.len() && chars[i] == '*' && chars[i + 1] == '/' {
+                i += 2;
+                col += 2;
+            }
             continue;
+        }
+
+        // Multi-character operators first
+        // Always check for ..= and .. before handling numbers/floats
+        if i + 3 <= chars.len() {
+            let op: String = chars[i..i + 3].iter().collect();
+            if op == "..=" {
+                tokens.push(Token {
+                    kind: TokenType::RangeInc, // inclusive
+                    value: Box::leak(op.into_boxed_str()),
+                    line,
+                    col,
+                });
+                i += 3;
+                col += 3;
+                continue;
+            }
+        }
+        if i + 2 <= chars.len() {
+            let op: String = chars[i..i + 2].iter().collect();
+            if op == ".." {
+                tokens.push(Token {
+                    kind: TokenType::RangeExc, // exclusive
+                    value: Box::leak(op.into_boxed_str()),
+                    line,
+                    col,
+                });
+                i += 2;
+                col += 2;
+                continue;
+            }
         }
 
         // For value inside string literal
@@ -163,10 +191,10 @@ pub fn lex(input: &str) -> Vec<Token<'_>> {
             }
             // Only emit String token if closing quote is found
             if i < chars.len() && chars[i] == '"' {
-                let value: &str = &input[start..i];
+                let value: String = chars[start..i].iter().collect();
                 tokens.push(Token {
                     kind: TokenType::String,
-                    value,
+                    value: Box::leak(value.into_boxed_str()),
                     line: token_line,
                     col: token_col,
                 });
@@ -195,7 +223,8 @@ pub fn lex(input: &str) -> Vec<Token<'_>> {
                 // Check if this is a range operator, not a float
                 if i + 1 < chars.len() && chars[i + 1] == '.' {
                     // Do not consume . here, let range logic above handle it
-                } else {
+                } else if i + 1 < chars.len() && chars[i + 1].is_digit(10) {
+                    // Only treat as float if there is at least one digit after the dot
                     has_dot = true;
                     i += 1;
                     col += 1;
@@ -204,6 +233,7 @@ pub fn lex(input: &str) -> Vec<Token<'_>> {
                         col += 1;
                     }
                 }
+                // else: do not consume the dot, let it be tokenized as a Dot later
             }
             // Exponent part
             if i < chars.len() && (chars[i] == 'e' || chars[i] == 'E') {
@@ -227,14 +257,14 @@ pub fn lex(input: &str) -> Vec<Token<'_>> {
                     has_exp = false;
                 }
             }
-            let value: &str = &input[start..i];
+            let value: String = chars[start..i].iter().collect();
             tokens.push(Token {
                 kind: if has_dot || has_exp {
                     TokenType::Float
                 } else {
                     TokenType::Number
                 },
-                value,
+                value: Box::leak(value.into_boxed_str()),
                 line: token_line,
                 col: token_col,
             });
@@ -260,7 +290,7 @@ pub fn lex(input: &str) -> Vec<Token<'_>> {
             if word.starts_with('_') {
                 tokens.push(Token {
                     kind: TokenType::Unknown,
-                    value: &input[start..start + word.len()],
+                    value: Box::leak(word.clone().into_boxed_str()),
                     line: token_line,
                     col: token_col,
                 });
@@ -268,7 +298,7 @@ pub fn lex(input: &str) -> Vec<Token<'_>> {
             } else {
                 tokens.push(Token {
                     kind: *kind,
-                    value: &input[start..start + word.len()],
+                    value: Box::leak(word.into_boxed_str()),
                     line: token_line,
                     col: token_col,
                 });
@@ -284,11 +314,11 @@ pub fn lex(input: &str) -> Vec<Token<'_>> {
         for len in (1..=3).rev() {
             // check for operators up to length 3
             if i + len <= chars.len() {
-                let op = &input[start..start + len];
-                if let Some(kind) = operators.get(op) {
+                let op: String = chars[start..start + len].iter().collect();
+                if let Some(kind) = operators.get(op.as_str()) {
                     tokens.push(Token {
                         kind: *kind,
-                        value: op,
+                        value: Box::leak(op.into_boxed_str()),
                         line: token_line,
                         col: token_col,
                     });
@@ -304,9 +334,10 @@ pub fn lex(input: &str) -> Vec<Token<'_>> {
         }
 
         // Unknown character: emit Unknown token
+        let value: String = chars[i..i + 1].iter().collect();
         tokens.push(Token {
             kind: TokenType::Unknown,
-            value: &input[i..i + 1],
+            value: Box::leak(value.into_boxed_str()),
             line,
             col,
         });

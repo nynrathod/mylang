@@ -34,6 +34,7 @@ impl fmt::Display for ParseError {
 
 /// The Parser struct is the stateful engine. It consumes tokens (from lexar)
 /// and builds AST nodes (for analyzer, codegen, etc).
+#[derive(Debug)]
 pub struct Parser<'a> {
     pub tokens: &'a [Token<'a>], // Reference to a slice of tokens from lexar.
     pub current: usize,          // Current index; tracks progress through tokens.
@@ -151,7 +152,7 @@ impl<'a> Parser<'a> {
                     Ok(expr)
                 }
 
-                // If the token doesn't match any known statement start, return an error.
+                // If the token doesn't match any known statement start, check for Unknown token and handle error.
                 _ => Err(ParseError::UnexpectedTokenAt {
                     msg: format!("Unexpected token: {:?}", tok.kind),
                     line: tok.line,
@@ -246,25 +247,67 @@ impl<'a> Parser<'a> {
                 match tok.kind {
                     TokenType::Number => {
                         let tok = self.advance().unwrap();
-                        let value = tok.value.parse::<i32>().map_err(|_| {
+                        let value_str = tok.value;
+                        let value_line = tok.line;
+                        let value_col = tok.col;
+                        // Mutable borrow ends here, now peek is allowed
+                        if let Some(next) = self.peek() {
+                            if next.kind == TokenType::Dot
+                                || next.kind == TokenType::RangeExc
+                                || next.kind == TokenType::RangeInc
+                            {
+                                return Err(ParseError::UnexpectedTokenAt {
+                                    msg: format!(
+                                        "Invalid number/range/dot sequence after number: {:?}",
+                                        next.kind
+                                    ),
+                                    line: next.line,
+                                    col: next.col,
+                                });
+                            }
+                        }
+                        let value = value_str.parse::<i32>().map_err(|_| {
                             ParseError::UnexpectedTokenAt {
-                                msg: format!("Invalid integer literal: {}", tok.value),
-                                line: tok.line,
-                                col: tok.col,
+                                msg: format!("Invalid integer literal: {}", value_str),
+                                line: value_line,
+                                col: value_col,
                             }
                         })?;
                         Ok(AstNode::NumberLiteral(value))
                     }
                     TokenType::Float => {
                         let tok = self.advance().unwrap();
-                        let value = tok.value.parse::<f64>().map_err(|_| {
+                        let value_str = tok.value;
+                        let value_line = tok.line;
+                        let value_col = tok.col;
+                        // Mutable borrow ends here, now peek is allowed
+                        if let Some(next) = self.peek() {
+                            if next.kind == TokenType::Dot
+                                || next.kind == TokenType::RangeExc
+                                || next.kind == TokenType::RangeInc
+                            {
+                                return Err(ParseError::UnexpectedTokenAt {
+                                    msg: format!(
+                                        "Invalid number/range/dot sequence after float: {:?}",
+                                        next.kind
+                                    ),
+                                    line: next.line,
+                                    col: next.col,
+                                });
+                            }
+                        }
+                        let value = value_str.parse::<f64>().map_err(|_| {
                             ParseError::UnexpectedTokenAt {
-                                msg: format!("Invalid float literal: {}", tok.value),
-                                line: tok.line,
-                                col: tok.col,
+                                msg: format!("Invalid float literal: {}", value_str),
+                                line: value_line,
+                                col: value_col,
                             }
                         })?;
                         Ok(AstNode::FloatLiteral(value))
+                    }
+                    TokenType::String => {
+                        let tok = self.advance().unwrap();
+                        Ok(AstNode::StringLiteral(tok.value.to_string()))
                     }
                     // ... handle other expression types as before ...
                     _ => {
