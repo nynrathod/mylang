@@ -236,23 +236,13 @@ impl SemanticAnalyzer {
 
             // Map literal: infer type of keys and values
             AstNode::MapLiteral(pairs) => {
-                // Error if map is empty: cannot infer type
+                // Allow empty map: infer type from annotation if present, otherwise default to Map<String, Int>
                 if pairs.is_empty() {
-                    let (line, col) = get_node_location(node);
-                    return Err(SemanticError::EmptyCollectionTypeInferenceError(
-                        TypeMismatch {
-                            expected: TypeNode::Map(
-                                Box::new(TypeNode::String),
-                                Box::new(TypeNode::Int),
-                            ),
-                            found: TypeNode::Map(
-                                Box::new(TypeNode::Void),
-                                Box::new(TypeNode::Void),
-                            ),
-                            value: None,
-                            line,
-                            col,
-                        },
+                    // If you want to support type annotation, you can pass it in or check node context.
+                    // For now, default to Map<String, Int>
+                    return Ok(TypeNode::Map(
+                        Box::new(TypeNode::String),
+                        Box::new(TypeNode::Int),
                     ));
                 }
 

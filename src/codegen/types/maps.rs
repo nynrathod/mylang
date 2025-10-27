@@ -1,5 +1,6 @@
 use crate::codegen::core::{CodeGen, MapMetadata};
 use inkwell::types::{BasicType, StructType};
+use inkwell::values::BasicValue;
 use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use inkwell::AddressSpace;
 
@@ -10,7 +11,24 @@ impl<'ctx> CodeGen<'ctx> {
         entries: &[(String, String)],
     ) -> Option<BasicValueEnum<'ctx>> {
         if entries.is_empty() {
-            panic!("Empty maps not supported");
+            // Allow empty maps: use i32 as default key/value type
+            let ptr = self.context.ptr_type(AddressSpace::default()).const_null();
+            self.temp_values
+                .insert(name.to_string(), ptr.as_basic_value_enum());
+
+            // Insert metadata for empty map so print_map knows to print {}
+            self.map_metadata.insert(
+                name.to_string(),
+                crate::codegen::MapMetadata {
+                    length: 0,
+                    key_type: "Int".to_string(),
+                    value_type: "Int".to_string(),
+                    key_is_string: false,
+                    value_is_string: false,
+                },
+            );
+
+            return Some(ptr.as_basic_value_enum());
         }
 
         // Track string keys and values
