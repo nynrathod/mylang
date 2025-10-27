@@ -16,6 +16,7 @@ pub struct MirBuilder {
     pub block_counter: usize, // For generating unique block labels
     pub loop_stack: Vec<LoopContext>, // Stack for nested loop break/continue targets
     pub rc_tracked_vars: Vec<Vec<String>>, // Stack of scopes with reference-counted variables
+    pub mir_symbol_table: std::collections::HashMap<String, crate::parser::ast::TypeNode>, // Track variable types for MIR
 }
 
 /// Context for tracking loop break/continue targets
@@ -38,6 +39,7 @@ impl MirBuilder {
             block_counter: 0,
             loop_stack: vec![],
             rc_tracked_vars: vec![vec![]],
+            mir_symbol_table: std::collections::HashMap::new(),
         }
     }
 

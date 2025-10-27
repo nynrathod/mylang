@@ -126,6 +126,7 @@ pub fn lex(input: &str) -> Vec<Token<'_>> {
         }
 
         // Multi-character operators first
+        // Always check for ..= and .. before handling numbers/floats
         if i + 3 <= chars.len() && &input[i..i + 3] == "..=" {
             tokens.push(Token {
                 kind: TokenType::RangeInc, // inclusive
@@ -176,18 +177,63 @@ pub fn lex(input: &str) -> Vec<Token<'_>> {
             continue;
         }
 
-        // Numbers (Not supporting float value)
+        // Numbers and floats
         if c.is_digit(10) {
             let token_line = line;
             let token_col = col;
             let start = i;
+            let mut has_dot = false;
+            let mut has_exp = false;
+            let mut exp_idx = 0;
+            // Integer part
             while i < chars.len() && chars[i].is_digit(10) {
                 i += 1;
                 col += 1;
             }
+            // Fractional part (float only if . is followed by digit and not .. or ..=)
+            if i < chars.len() && chars[i] == '.' {
+                // Check if this is a range operator, not a float
+                if i + 1 < chars.len() && chars[i + 1] == '.' {
+                    // Do not consume . here, let range logic above handle it
+                } else {
+                    has_dot = true;
+                    i += 1;
+                    col += 1;
+                    while i < chars.len() && chars[i].is_digit(10) {
+                        i += 1;
+                        col += 1;
+                    }
+                }
+            }
+            // Exponent part
+            if i < chars.len() && (chars[i] == 'e' || chars[i] == 'E') {
+                has_exp = true;
+                exp_idx = i;
+                i += 1;
+                col += 1;
+                if i < chars.len() && (chars[i] == '+' || chars[i] == '-') {
+                    i += 1;
+                    col += 1;
+                }
+                let exp_start = i;
+                while i < chars.len() && chars[i].is_digit(10) {
+                    i += 1;
+                    col += 1;
+                }
+                // If exponent is not followed by digits, treat as integer/float up to 'e'
+                if exp_start == i {
+                    i = exp_idx; // rewind to before 'e'
+                    col -= i - exp_idx;
+                    has_exp = false;
+                }
+            }
             let value: &str = &input[start..i];
             tokens.push(Token {
-                kind: TokenType::Number,
+                kind: if has_dot || has_exp {
+                    TokenType::Float
+                } else {
+                    TokenType::Number
+                },
                 value,
                 line: token_line,
                 col: token_col,

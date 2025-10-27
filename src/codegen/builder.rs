@@ -21,6 +21,7 @@ impl<'ctx> CodeGen<'ctx> {
         match instr {
             // Constants
             MirInstr::ConstInt { name, value } => self.generate_const_int(name, *value),
+            MirInstr::ConstFloat { name, value } => self.generate_const_float(name, *value),
             MirInstr::ConstBool { name, value } => self.generate_const_bool(name, *value),
             MirInstr::ConstString { name, value } => self.generate_const_string(name, value),
 

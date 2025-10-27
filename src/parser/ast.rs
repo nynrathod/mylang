@@ -30,6 +30,7 @@ pub enum Pattern {
 pub enum AstNode {
     Program(Vec<AstNode>),
     NumberLiteral(i32),
+    FloatLiteral(f64),
     Identifier(String),
     StringLiteral(String),
     BoolLiteral(bool),

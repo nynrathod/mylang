@@ -161,6 +161,20 @@ impl<'ctx> CodeGen<'ctx> {
                             "print_call",
                         )
                         .unwrap();
+                } else if val.is_float_value() {
+                    let format_str = if idx < values.len() - 1 { "%f " } else { "%f" };
+                    let format_global = self
+                        .builder
+                        .build_global_string_ptr(format_str, "print_fmt_float")
+                        .unwrap();
+
+                    self.builder
+                        .build_call(
+                            printf_fn,
+                            &[format_global.as_pointer_value().into(), val.into()],
+                            "print_float_call",
+                        )
+                        .unwrap();
                 } else if val.is_pointer_value() {
                     let format_str = if idx < values.len() - 1 { "%s " } else { "%s" };
                     let format_global = self

@@ -1,6 +1,7 @@
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TokenType {
     Unknown, // For invalid or unrecognized characters
+    Eof,
     // --- Keywords ---
     Let,      // let
     Mut,      // mutable keyword for let
@@ -19,6 +20,7 @@ pub enum TokenType {
 
     // --- Literals ---
     Number,
+    Float,
     String,
     Boolean,
 
@@ -72,8 +74,8 @@ pub enum TokenType {
     Comma,        // ,
     Semi,         // ;
     Dot,          // .
-    RangeInc,     // ..
-    RangeExc,     // ..=
+    RangeInc,     // ..=
+    RangeExc,     // ..
     Colon,        // :
     Pound,        // #
     Tilde,        // ~

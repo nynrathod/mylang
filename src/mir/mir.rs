@@ -51,6 +51,10 @@ pub enum MirInstr {
         name: String,
         value: i32,
     },
+    ConstFloat {
+        name: String,
+        value: f64,
+    },
     ConstBool {
         name: String,
         value: bool,

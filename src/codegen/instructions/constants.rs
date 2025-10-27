@@ -14,6 +14,15 @@ impl<'ctx> CodeGen<'ctx> {
         Some(val.into())
     }
 
+    pub fn generate_const_float(&mut self, name: &str, value: f64) -> Option<BasicValueEnum<'ctx>> {
+        let val = self.context.f64_type().const_float(value);
+        if let Some(sym) = self.symbols.get(name) {
+            self.builder.build_store(sym.ptr, val).unwrap();
+        }
+        self.temp_values.insert(name.to_string(), val.into());
+        Some(val.into())
+    }
+
     pub fn generate_const_bool(&mut self, name: &str, value: bool) -> Option<BasicValueEnum<'ctx>> {
         // Use i32 instead of i1 for consistency with rest of codegen
         let val = self.context.i32_type().const_int(value as u64, false);

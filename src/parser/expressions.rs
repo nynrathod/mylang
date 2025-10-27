@@ -75,6 +75,10 @@ impl<'a> Parser<'a> {
                     let tok = self.advance().unwrap();
                     Ok(AstNode::NumberLiteral(tok.value.parse::<i32>().unwrap()))
                 }
+                TokenType::Float => {
+                    let tok = self.advance().unwrap();
+                    Ok(AstNode::FloatLiteral(tok.value.parse::<f64>().unwrap()))
+                }
                 TokenType::Identifier => {
                     let tok = self.advance().unwrap();
                     let name = tok.value.to_string();
@@ -158,7 +162,7 @@ impl<'a> Parser<'a> {
             TokenType::Lt | TokenType::Gt | TokenType::LtEq | TokenType::GtEq => 4,
             TokenType::Plus | TokenType::Minus => 5,
             TokenType::Star | TokenType::Slash | TokenType::Percent => 6,
-            TokenType::RangeExc | TokenType::RangeInc => 7,
+            TokenType::RangeExc | TokenType::RangeInc => 7, // Add range operators with lowest precedence
             _ => 0,
         }
     }

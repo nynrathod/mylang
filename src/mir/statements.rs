@@ -23,9 +23,15 @@ pub fn build_statement(builder: &mut MirBuilder, stmt: &AstNode, block: &mut Mir
                 Pattern::Identifier(name) => {
                     block.instrs.push(MirInstr::Assign {
                         name: name.clone(),
-                        value: value_tmp,
+                        value: value_tmp.clone(),
                         mutable: *mutable,
                     });
+
+                    // Track variable type in mir_symbol_table
+                    // Copy type from value_tmp if available
+                    if let Some(value_type) = builder.mir_symbol_table.get(&value_tmp).cloned() {
+                        builder.mir_symbol_table.insert(name.clone(), value_type);
+                    }
                 }
                 // Tuple destructuring: let (a, b) = expr;
                 Pattern::Tuple(patterns) => {
@@ -59,9 +65,15 @@ pub fn build_statement(builder: &mut MirBuilder, stmt: &AstNode, block: &mut Mir
                 Pattern::Identifier(name) => {
                     block.instrs.push(MirInstr::Assign {
                         name: name.clone(),
-                        value: value_tmp,
+                        value: value_tmp.clone(),
                         mutable: true,
                     });
+
+                    // Track variable type in mir_symbol_table for re-assignments
+                    // Copy type from value_tmp if available
+                    if let Some(value_type) = builder.mir_symbol_table.get(&value_tmp).cloned() {
+                        builder.mir_symbol_table.insert(name.clone(), value_type);
+                    }
                 }
                 // Tuple destructuring assignment.
                 Pattern::Tuple(patterns) => {

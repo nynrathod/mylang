@@ -144,6 +144,13 @@ impl<'a> Parser<'a> {
                     }
                 }
 
+                TokenType::Number | TokenType::Float => {
+                    // Allow number/float literals as statements (for testing, REPL, etc.)
+                    let expr = self.parse_expression()?;
+                    self.expect(TokenType::Semi)?;
+                    Ok(expr)
+                }
+
                 // If the token doesn't match any known statement start, return an error.
                 _ => Err(ParseError::UnexpectedTokenAt {
                     msg: format!("Unexpected token: {:?}", tok.kind),
@@ -230,5 +237,47 @@ impl<'a> Parser<'a> {
             }
         }
         Ok(items)
+    }
+
+    /// Parses a single simple expression, including literals.
+    pub fn parse_simple_expression(&mut self) -> ParseResult<AstNode> {
+        match self.peek() {
+            Some(tok) => {
+                match tok.kind {
+                    TokenType::Number => {
+                        let tok = self.advance().unwrap();
+                        let value = tok.value.parse::<i32>().map_err(|_| {
+                            ParseError::UnexpectedTokenAt {
+                                msg: format!("Invalid integer literal: {}", tok.value),
+                                line: tok.line,
+                                col: tok.col,
+                            }
+                        })?;
+                        Ok(AstNode::NumberLiteral(value))
+                    }
+                    TokenType::Float => {
+                        let tok = self.advance().unwrap();
+                        let value = tok.value.parse::<f64>().map_err(|_| {
+                            ParseError::UnexpectedTokenAt {
+                                msg: format!("Invalid float literal: {}", tok.value),
+                                line: tok.line,
+                                col: tok.col,
+                            }
+                        })?;
+                        Ok(AstNode::FloatLiteral(value))
+                    }
+                    // ... handle other expression types as before ...
+                    _ => {
+                        // Fallback to existing logic or error
+                        Err(ParseError::UnexpectedTokenAt {
+                            msg: format!("Unexpected token in expression: {:?}", tok.kind),
+                            line: tok.line,
+                            col: tok.col,
+                        })
+                    }
+                }
+            }
+            None => Err(ParseError::EndOfInput),
+        }
     }
 }
