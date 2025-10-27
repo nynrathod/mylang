@@ -343,8 +343,11 @@ fn compile_to_native(
 
     link_object_file(&obj_file, exe_path.to_str().unwrap(), opts.dev_mode)?;
 
+    // Always remove .o file after linking unless keep_obj is true
     if !opts.keep_obj {
-        let _ = fs::remove_file(&obj_file);
+        if fs::remove_file(&obj_file).is_err() && opts.dev_mode {
+            eprintln!("Warning: failed to remove object file {}", obj_file);
+        }
     }
 
     Ok(())
@@ -374,15 +377,19 @@ fn link_object_file(obj_file: &str, output: &str, dev_mode: bool) -> Result<(), 
             }
             cmd.arg("ucrt.lib")
                 .arg("vcruntime.lib")
-                .arg("legacy_stdio_definitions.lib");
+                .arg("legacy_stdio_definitions.lib")
+                .arg("libcmt.lib");
         }
 
         let result = cmd.output();
         match result {
             Ok(r) if r.status.success() => Ok(()),
-            _ => Err("Linking failed. Install Visual Studio Build Tools:\n\
-                https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022"
-                .to_string()),
+            Ok(r) => Err(format!(
+                "Linking failed:\nSTDOUT:\n{}\nSTDERR:\n{}",
+                String::from_utf8_lossy(&r.stdout),
+                String::from_utf8_lossy(&r.stderr)
+            )),
+            Err(e) => Err(format!("Linker error: {}", e)),
         }
     }
 
