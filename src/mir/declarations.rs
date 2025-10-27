@@ -59,6 +59,16 @@ pub fn build_let_decl(builder: &mut MirBuilder, node: &AstNode) -> Vec<MirInstr>
                     mutable: *mutable,
                 });
 
+                // Track variable type in mir_symbol_table
+                // Copy type from value_tmp if available, or use type_annotation
+                if let Some(value_type) = builder.mir_symbol_table.get(&value_tmp).cloned() {
+                    builder.mir_symbol_table.insert(name.clone(), value_type);
+                } else if let Some(type_ann) = type_annotation {
+                    builder
+                        .mir_symbol_table
+                        .insert(name.clone(), type_ann.clone());
+                }
+
                 // Insert IncRef ONLY when copying from an existing variable.
                 // Don't incref for newly created temps (they already have RC=1).
                 if needs_rc && is_copying_variable {
@@ -169,6 +179,13 @@ pub fn build_function_decl(builder: &mut MirBuilder, node: &AstNode) {
             };
 
             param_rc_types.push((param_name.clone(), is_rc));
+
+            // Track parameter types in mir_symbol_table
+            if let Some(ptype) = param_type {
+                builder
+                    .mir_symbol_table
+                    .insert(param_name.clone(), ptype.clone());
+            }
 
             // DO NOT track parameters as RC variables for cleanup
             // Parameters are owned by the caller, not by this function
