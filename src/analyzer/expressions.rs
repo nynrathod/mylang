@@ -3,6 +3,14 @@ use super::types::{NamedError, SemanticError, TypeMismatch};
 use crate::lexar::token::TokenType;
 use crate::parser::ast::{AstNode, TypeNode};
 
+/// Helper to extract line/col from an AstNode
+/// For now, returns None since parser hasn't been updated yet
+fn get_node_location(_node: &AstNode) -> (Option<usize>, Option<usize>) {
+    // TODO: Once parser is updated to include line/col in AST nodes,
+    // implement proper extraction here
+    (None, None)
+}
+
 impl SemanticAnalyzer {
     /// Infers the type of an AST node (expression).
     /// This is the core type inference function for all expressions in the language.
@@ -14,6 +22,8 @@ impl SemanticAnalyzer {
         match node {
             // Integer literal: always Int type
             AstNode::NumberLiteral(_) => Ok(TypeNode::Int),
+            // Float literal: always Float type
+            AstNode::FloatLiteral(_) => Ok(TypeNode::Float),
             // String literal: always String type
             AstNode::StringLiteral(_) => Ok(TypeNode::String),
             // Boolean literal: always Bool type
@@ -64,10 +74,13 @@ impl SemanticAnalyzer {
                     | TokenType::LtEq => {
                         // Both sides must be the same type
                         if left_type != right_type {
+                            let (line, col) = get_node_location(node);
                             return Err(SemanticError::OperatorTypeMismatch(TypeMismatch {
                                 expected: left_type,
                                 found: right_type,
                                 value: None,
+                                line,
+                                col,
                             }));
                         }
                         // Comparison always returns Bool
@@ -80,6 +93,7 @@ impl SemanticAnalyzer {
                     TokenType::RangeExc | TokenType::RangeInc => {
                         // Both start and end must be Int
                         if left_type != TypeNode::Int || right_type != TypeNode::Int {
+                            let (line, col) = get_node_location(node);
                             return Err(SemanticError::OperatorTypeMismatch(TypeMismatch {
                                 expected: TypeNode::Int,
                                 found: if left_type != TypeNode::Int {
@@ -88,6 +102,8 @@ impl SemanticAnalyzer {
                                     right_type
                                 },
                                 value: None,
+                                line,
+                                col,
                             }));
                         }
                         // Determine if range is inclusive or exclusive
@@ -107,6 +123,7 @@ impl SemanticAnalyzer {
                     TokenType::AndAnd | TokenType::OrOr => {
                         // Both sides must be Bool
                         if left_type != TypeNode::Bool || right_type != TypeNode::Bool {
+                            let (line, col) = get_node_location(node);
                             return Err(SemanticError::OperatorTypeMismatch(TypeMismatch {
                                 expected: TypeNode::Bool,
                                 found: if left_type != TypeNode::Bool {
@@ -115,6 +132,8 @@ impl SemanticAnalyzer {
                                     right_type
                                 },
                                 value: None,
+                                line,
+                                col,
                             }));
                         }
                         Ok(TypeNode::Bool)
@@ -136,11 +155,16 @@ impl SemanticAnalyzer {
                         // Float arithmetic (if supported)
                         (TypeNode::Float, TypeNode::Float) => Ok(TypeNode::Float),
                         // Any other type combination is invalid
-                        _ => Err(SemanticError::OperatorTypeMismatch(TypeMismatch {
-                            expected: left_type,
-                            found: right_type,
-                            value: None,
-                        })),
+                        _ => {
+                            let (line, col) = get_node_location(node);
+                            Err(SemanticError::OperatorTypeMismatch(TypeMismatch {
+                                expected: left_type,
+                                found: right_type,
+                                value: None,
+                                line,
+                                col,
+                            }))
+                        }
                     },
 
                     // Any other operator is not implemented
@@ -183,13 +207,10 @@ impl SemanticAnalyzer {
                 // Error if array is empty: cannot infer type
                 // let empty = [];
                 if elements.is_empty() {
-                    return Err(SemanticError::EmptyCollectionTypeInferenceError(
-                        TypeMismatch {
-                            expected: TypeNode::Array(Box::new(TypeNode::Int)),
-                            found: TypeNode::Array(Box::new(TypeNode::Void)),
-                            value: None,
-                        },
-                    ));
+                    // Allow empty array: infer type from annotation if present, otherwise default to Array<Int>
+                    // If you want to support type annotation, you can pass it in or check node context.
+                    // For now, default to Array<Int>
+                    return Ok(TypeNode::Array(Box::new(TypeNode::Int)));
                 }
 
                 // Infer type from first element
@@ -199,10 +220,13 @@ impl SemanticAnalyzer {
                 for el in elements.iter() {
                     let t = self.infer_type(el)?;
                     if t != first_type {
+                        let (line, col) = get_node_location(el);
                         return Err(SemanticError::VarTypeMismatch(TypeMismatch {
                             expected: first_type.clone(),
                             found: t,
                             value: None,
+                            line,
+                            col,
                         }));
                     }
                 }
@@ -214,6 +238,7 @@ impl SemanticAnalyzer {
             AstNode::MapLiteral(pairs) => {
                 // Error if map is empty: cannot infer type
                 if pairs.is_empty() {
+                    let (line, col) = get_node_location(node);
                     return Err(SemanticError::EmptyCollectionTypeInferenceError(
                         TypeMismatch {
                             expected: TypeNode::Map(
@@ -225,6 +250,8 @@ impl SemanticAnalyzer {
                                 Box::new(TypeNode::Void),
                             ),
                             value: None,
+                            line,
+                            col,
                         },
                     ));
                 }
@@ -253,17 +280,23 @@ impl SemanticAnalyzer {
                     let kt = self.infer_type(k)?;
                     let vt = self.infer_type(v)?;
                     if kt != key_type {
+                        let (line, col) = get_node_location(k);
                         return Err(SemanticError::VarTypeMismatch(TypeMismatch {
                             expected: key_type.clone(),
                             found: kt,
                             value: None,
+                            line,
+                            col,
                         }));
                     }
                     if vt != value_type {
+                        let (line, col) = get_node_location(v);
                         return Err(SemanticError::VarTypeMismatch(TypeMismatch {
                             expected: value_type.clone(),
                             found: vt,
                             value: None,
+                            line,
+                            col,
                         }));
                     }
                 }

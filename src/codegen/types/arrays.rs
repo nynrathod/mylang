@@ -13,11 +13,13 @@ impl<'ctx> CodeGen<'ctx> {
         let element_values: Vec<BasicValueEnum<'ctx>> =
             elements.iter().map(|el| self.resolve_value(el)).collect();
 
-        if element_values.is_empty() {
-            panic!("Empty arrays not supported");
-        }
+        // Allow empty arrays: default element type to Int if elements is empty
+        let elem_type = if element_values.is_empty() {
+            self.context.i32_type().as_basic_type_enum()
+        } else {
+            element_values[0].get_type()
+        };
 
-        let elem_type = element_values[0].get_type();
         let array_type = elem_type.array_type(elements.len() as u32);
 
         // Track string pointers
