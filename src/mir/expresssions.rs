@@ -4,6 +4,37 @@ use crate::{
     parser::ast::{AstNode, TypeNode},
 };
 
+/// Helper function to determine the type of an operand by looking it up in the symbol table
+fn get_operand_type(builder: &MirBuilder, operand: &str) -> Option<TypeNode> {
+    builder.mir_symbol_table.get(operand).cloned()
+}
+
+/// Helper function to determine the operation type for binary operations
+/// Returns "float" if either operand is float, "int" if both are int, or None for incompatible types
+fn determine_op_type(builder: &MirBuilder, lhs: &str, rhs: &str) -> Result<String, String> {
+    let lhs_type = get_operand_type(builder, lhs);
+    let rhs_type = get_operand_type(builder, rhs);
+
+    match (lhs_type, rhs_type) {
+        (Some(TypeNode::Float), Some(TypeNode::Float)) => Ok("float".to_string()),
+        (Some(TypeNode::Float), Some(TypeNode::Int)) => Ok("float".to_string()),
+        (Some(TypeNode::Int), Some(TypeNode::Float)) => Ok("float".to_string()),
+        (Some(TypeNode::Int), Some(TypeNode::Int)) => Ok("int".to_string()),
+        (Some(TypeNode::String), Some(TypeNode::String)) => Ok("string".to_string()),
+        (Some(TypeNode::String), _) | (_, Some(TypeNode::String)) => {
+            Err(format!("Cannot perform arithmetic on string types"))
+        }
+        (Some(lhs_t), Some(rhs_t)) => Err(format!(
+            "Type mismatch: cannot operate on {:?} and {:?}",
+            lhs_t, rhs_t
+        )),
+        _ => {
+            // If we don't know the type, assume int (for backward compatibility with untracked variables)
+            Ok("int".to_string())
+        }
+    }
+}
+
 pub fn build_expression(builder: &mut MirBuilder, expr: &AstNode, block: &mut MirBlock) -> String {
     match expr {
         AstNode::NumberLiteral(n) => {
@@ -12,7 +43,20 @@ pub fn build_expression(builder: &mut MirBuilder, expr: &AstNode, block: &mut Mi
                 name: tmp.clone(),
                 value: *n,
             });
-
+            // Track type in symbol table
+            builder.mir_symbol_table.insert(tmp.clone(), TypeNode::Int);
+            tmp
+        }
+        AstNode::FloatLiteral(f) => {
+            let tmp = builder.next_tmp();
+            block.instrs.push(MirInstr::ConstFloat {
+                name: tmp.clone(),
+                value: *f,
+            });
+            // Track type in symbol table
+            builder
+                .mir_symbol_table
+                .insert(tmp.clone(), TypeNode::Float);
             tmp
         }
 
@@ -22,7 +66,8 @@ pub fn build_expression(builder: &mut MirBuilder, expr: &AstNode, block: &mut Mi
                 name: tmp.clone(),
                 value: *b,
             });
-
+            // Track type in symbol table
+            builder.mir_symbol_table.insert(tmp.clone(), TypeNode::Bool);
             tmp
         }
 
@@ -32,7 +77,10 @@ pub fn build_expression(builder: &mut MirBuilder, expr: &AstNode, block: &mut Mi
                 name: tmp.clone(),
                 value: s.clone(),
             });
-
+            // Track type in symbol table
+            builder
+                .mir_symbol_table
+                .insert(tmp.clone(), TypeNode::String);
             tmp
         }
 
@@ -61,24 +109,58 @@ pub fn build_expression(builder: &mut MirBuilder, expr: &AstNode, block: &mut Mi
                     let lhs_tmp = build_expression(builder, left, block);
                     let rhs_tmp = build_expression(builder, right, block);
                     let dest_tmp = builder.next_tmp();
+
                     if *op == TokenType::Plus {
-                        // String concatenation if both operands are string literals.
-                        if matches!(&**left, AstNode::StringLiteral(_))
-                            && matches!(&**right, AstNode::StringLiteral(_))
+                        // Check if this is string concatenation
+                        let lhs_type = get_operand_type(builder, &lhs_tmp);
+                        let rhs_type = get_operand_type(builder, &rhs_tmp);
+
+                        if matches!(lhs_type, Some(TypeNode::String))
+                            || matches!(rhs_type, Some(TypeNode::String))
                         {
                             block.instrs.push(MirInstr::StringConcat {
                                 name: dest_tmp.clone(),
                                 left: lhs_tmp,
                                 right: rhs_tmp,
                             });
+                            builder
+                                .mir_symbol_table
+                                .insert(dest_tmp.clone(), TypeNode::String);
                         } else {
-                            // Otherwise, assume integer addition.
-                            block.instrs.push(MirInstr::BinaryOp(
-                                "add".to_string(),
-                                dest_tmp.clone(),
-                                lhs_tmp,
-                                rhs_tmp,
-                            ));
+                            // Numeric addition - determine operation type
+                            match determine_op_type(builder, &lhs_tmp, &rhs_tmp) {
+                                Ok(op_type) if op_type == "string" => {
+                                    block.instrs.push(MirInstr::StringConcat {
+                                        name: dest_tmp.clone(),
+                                        left: lhs_tmp,
+                                        right: rhs_tmp,
+                                    });
+                                    builder
+                                        .mir_symbol_table
+                                        .insert(dest_tmp.clone(), TypeNode::String);
+                                }
+                                Ok(op_type) => {
+                                    block.instrs.push(MirInstr::BinaryOp(
+                                        format!("add:{}", op_type),
+                                        dest_tmp.clone(),
+                                        lhs_tmp,
+                                        rhs_tmp,
+                                    ));
+                                    // Track result type
+                                    if op_type == "float" {
+                                        builder
+                                            .mir_symbol_table
+                                            .insert(dest_tmp.clone(), TypeNode::Float);
+                                    } else {
+                                        builder
+                                            .mir_symbol_table
+                                            .insert(dest_tmp.clone(), TypeNode::Int);
+                                    }
+                                }
+                                Err(err) => {
+                                    panic!("Type error in addition: {}", err);
+                                }
+                            }
                         }
                     } else {
                         // Other binary operators (sub, mul, div, comparisons, etc.).
@@ -97,12 +179,40 @@ pub fn build_expression(builder: &mut MirBuilder, expr: &AstNode, block: &mut Mi
                         }
                         .to_string();
 
-                        block.instrs.push(MirInstr::BinaryOp(
-                            op_str,
-                            dest_tmp.clone(),
-                            lhs_tmp,
-                            rhs_tmp,
-                        ));
+                        // Determine operation type based on operands
+                        match determine_op_type(builder, &lhs_tmp, &rhs_tmp) {
+                            Ok(op_type) if op_type == "string" => {
+                                panic!("Cannot perform '{}' operation on string types", op_str);
+                            }
+                            Ok(op_type) => {
+                                block.instrs.push(MirInstr::BinaryOp(
+                                    format!("{}:{}", op_str, op_type),
+                                    dest_tmp.clone(),
+                                    lhs_tmp,
+                                    rhs_tmp,
+                                ));
+                                // Track result type - comparisons return bool, others return the operand type
+                                if matches!(
+                                    op_str.as_str(),
+                                    "eq" | "ne" | "lt" | "le" | "gt" | "ge"
+                                ) {
+                                    builder
+                                        .mir_symbol_table
+                                        .insert(dest_tmp.clone(), TypeNode::Bool);
+                                } else if op_type == "float" {
+                                    builder
+                                        .mir_symbol_table
+                                        .insert(dest_tmp.clone(), TypeNode::Float);
+                                } else {
+                                    builder
+                                        .mir_symbol_table
+                                        .insert(dest_tmp.clone(), TypeNode::Int);
+                                }
+                            }
+                            Err(err) => {
+                                panic!("Type error in '{}' operation: {}", op_str, err);
+                            }
+                        }
                     }
 
                     dest_tmp
@@ -147,7 +257,10 @@ pub fn build_expression(builder: &mut MirBuilder, expr: &AstNode, block: &mut Mi
                 name: tmp.clone(),
                 elements: tmp_elements,
             });
-
+            // Track type in symbol table (simplified - could track element type)
+            builder
+                .mir_symbol_table
+                .insert(tmp.clone(), TypeNode::Array(Box::new(TypeNode::Void)));
             tmp
         }
 
@@ -164,7 +277,13 @@ pub fn build_expression(builder: &mut MirBuilder, expr: &AstNode, block: &mut Mi
                 name: tmp.clone(),
                 entries: map_entries,
             });
-
+            // Track type in symbol table: for empty maps, use default String, Int
+            let map_type = if entries.is_empty() {
+                TypeNode::Map(Box::new(TypeNode::String), Box::new(TypeNode::Int))
+            } else {
+                TypeNode::Map(Box::new(TypeNode::Void), Box::new(TypeNode::Void))
+            };
+            builder.mir_symbol_table.insert(tmp.clone(), map_type);
             tmp
         }
 
