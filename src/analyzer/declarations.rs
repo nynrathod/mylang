@@ -32,6 +32,8 @@ impl SemanticAnalyzer {
                         expected: type_annotation.clone().unwrap_or(TypeNode::Int),
                         found: TypeNode::Void,
                         value: Some(value.clone()),
+                        line: None,
+                        col: None,
                     })
                 })?;
 
@@ -41,6 +43,8 @@ impl SemanticAnalyzer {
                             expected: annotated_type.clone(),
                             found: rhs_type,
                             value: Some(value.clone()),
+                            line: None,
+                            col: None,
                         }));
                     }
                 }
@@ -76,6 +80,13 @@ impl SemanticAnalyzer {
                     match target {
                         // Identifier: add to symbol table, mark mutability.
                         crate::parser::ast::Pattern::Identifier(name) => {
+                            // Disallow variable names starting with underscore
+                            if name.starts_with('_') {
+                                return Err(SemanticError::InvalidAssignmentTarget {
+                                    target: format!("Variable names starting with underscore are not allowed: '{}'", name),
+                                    // No line/col available here
+                                });
+                            }
                             // Skip wildcards (do not store them).
                             if name != "_" {
                                 // Check for redeclaration in the current scope only
@@ -348,6 +359,8 @@ impl SemanticAnalyzer {
                                     .collect::<Result<Vec<_>, _>>()?,
                             ),
                             value: None,
+                            line: None,
+                            col: None,
                         },
                     });
                 }
@@ -360,6 +373,8 @@ impl SemanticAnalyzer {
                                 expected: expected_type.clone(),
                                 found: value_type,
                                 value: None,
+                                line: None,
+                                col: None,
                             },
                         });
                     }
@@ -380,6 +395,8 @@ impl SemanticAnalyzer {
                                     .collect::<Result<Vec<_>, _>>()?,
                             ),
                             value: None,
+                            line: None,
+                            col: None,
                         },
                     });
                 }
@@ -391,6 +408,8 @@ impl SemanticAnalyzer {
                             expected: expected.clone(),
                             found: value_type,
                             value: None,
+                            line: None,
+                            col: None,
                         },
                     });
                 }

@@ -242,11 +242,11 @@ pub fn lex(input: &str) -> Vec<Token<'_>> {
         }
 
         // Alphabetic: keywords or identifiers
-        if c.is_alphabetic() {
+        if c.is_alphabetic() || c == '_' {
             let token_line = line;
             let token_col = col;
             let start = i;
-            while i < chars.len() && chars[i].is_alphanumeric() {
+            while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') {
                 i += 1;
                 col += 1;
             }
@@ -255,12 +255,24 @@ pub fn lex(input: &str) -> Vec<Token<'_>> {
             let kind = keywords
                 .get(word.as_str())
                 .unwrap_or(&TokenType::Identifier);
-            tokens.push(Token {
-                kind: *kind,
-                value: &input[start..start + word.len()],
-                line: token_line,
-                col: token_col,
-            });
+
+            // Disallow identifiers starting with underscore
+            if word.starts_with('_') {
+                tokens.push(Token {
+                    kind: TokenType::Unknown,
+                    value: &input[start..start + word.len()],
+                    line: token_line,
+                    col: token_col,
+                });
+                // Optionally: emit error here or let parser/analyzer handle centralized error
+            } else {
+                tokens.push(Token {
+                    kind: *kind,
+                    value: &input[start..start + word.len()],
+                    line: token_line,
+                    col: token_col,
+                });
+            }
             continue;
         }
 
