@@ -33,11 +33,18 @@ impl SemanticAnalyzer {
         // Check mutability for each assignment target
         for (target, _) in targets.iter().zip(rhs_types.iter()) {
             if let Pattern::Identifier(name) = target {
-                if let Some(info) = self.symbol_table.get(name) {
-                    if !info.mutable {
-                        return Err(SemanticError::InvalidAssignmentTarget {
-                            target: format!("Cannot assign to immutable variable '{}'", name),
-                        });
+                match self.symbol_table.get(name) {
+                    Some(info) => {
+                        if !info.mutable {
+                            return Err(SemanticError::InvalidAssignmentTarget {
+                                target: format!("Cannot assign to immutable variable '{}'", name),
+                            });
+                        }
+                    }
+                    None => {
+                        return Err(SemanticError::UndeclaredVariable(NamedError {
+                            name: name.clone(),
+                        }));
                     }
                 }
             }
@@ -261,6 +268,8 @@ impl SemanticAnalyzer {
                 expected: TypeNode::Bool,
                 found: cond_type,
                 value: None,
+                line: None,
+                col: None,
             }));
         }
 
