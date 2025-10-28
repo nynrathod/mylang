@@ -86,6 +86,12 @@ pub enum AstNode {
         value: Box<AstNode>,
     },
 
+    CompoundAssignment {
+        pattern: Pattern,
+        op: TokenType, // PlusEq, MinusEq, StarEq, SlashEq
+        value: Box<AstNode>,
+    },
+
     FunctionDecl {
         name: String,
         visibility: String,
@@ -110,6 +116,12 @@ pub enum AstNode {
         start: Box<AstNode>,
         end: Box<AstNode>,
         inclusive: bool,
+    },
+
+    // --- Array/Map Element Access ---
+    ElementAccess {
+        array: Box<AstNode>,
+        index: Box<AstNode>,
     },
 
     // --- Module Import ---

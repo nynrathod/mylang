@@ -98,6 +98,54 @@ pub fn build_statement(builder: &mut MirBuilder, stmt: &AstNode, block: &mut Mir
             }
         }
 
+        // Handle compound assignment statements (e.g., x += 1, y *= 2).
+        // Converts `x += expr` to `x = x + expr` at the MIR level.
+        AstNode::CompoundAssignment { pattern, op, value } => {
+            if let Pattern::Identifier(name) = pattern {
+                // Build MIR for the RHS expression
+                let rhs_tmp = build_expression(builder, value, block);
+
+                // Map compound operator to binary operator string
+                let op_str = match op {
+                    TokenType::PlusEq => "add",
+                    TokenType::MinusEq => "sub",
+                    TokenType::StarEq => "mul",
+                    TokenType::SlashEq => "div",
+                    _ => return, // Should not happen due to parser validation
+                };
+
+                // Determine the operation type (int or float) based on the variable and RHS types
+                use crate::mir::expresssions::determine_op_type;
+                let op_type = match determine_op_type(builder, name, &rhs_tmp) {
+                    Ok(t) => t,
+                    Err(_) => "int".to_string(), // Default to int if type cannot be determined
+                };
+
+                // Create a temporary for the binary operation result
+                let result_tmp = builder.next_tmp();
+
+                // Generate: result_tmp = name <op> rhs_tmp
+                block.instrs.push(MirInstr::BinaryOp(
+                    format!("{}:{}", op_str, op_type),
+                    result_tmp.clone(),
+                    name.clone(),
+                    rhs_tmp,
+                ));
+
+                // Generate: name = result_tmp
+                block.instrs.push(MirInstr::Assign {
+                    name: name.clone(),
+                    value: result_tmp.clone(),
+                    mutable: true,
+                });
+
+                // Track variable type in mir_symbol_table
+                if let Some(value_type) = builder.mir_symbol_table.get(&result_tmp).cloned() {
+                    builder.mir_symbol_table.insert(name.clone(), value_type);
+                }
+            }
+        }
+
         // Handle struct declarations (type definitions, not instances).
         AstNode::StructDecl { name, fields } => {
             // Create a placeholder instance showing the structure.
@@ -233,8 +281,7 @@ pub fn build_statement(builder: &mut MirBuilder, stmt: &AstNode, block: &mut Mir
 
             // Replace current block with the end_label continuation
             // This ensures subsequent statements in the same scope go into the continuation block
-            // The caller will add this block when it finishes processing all statements
-            block.label = end_label;
+            block.label = end_label.clone();
             block.instrs.clear();
             block.terminator = None;
         }

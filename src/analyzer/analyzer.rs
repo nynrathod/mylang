@@ -24,8 +24,22 @@ pub struct SemanticAnalyzer {
     pub loop_depth: usize,                // Track loop nesting for break/continue error handling
     pub scope_stack: Vec<HashMap<String, SymbolInfo>>, // Scope stack for block scoping
 
-    // NEW: Error collection
-    pub collected_errors: Vec<SemanticError>, // Collect errors instead of returning immediately
+    pub collected_errors: Vec<SemanticError>, // Collect all errors for reporting
+}
+
+impl SemanticAnalyzer {
+    /// Lookup a variable by name, searching current scope and then walking up the scope stack.
+    pub fn lookup_variable(&self, name: &str) -> Option<&SymbolInfo> {
+        if let Some(info) = self.symbol_table.get(name) {
+            return Some(info);
+        }
+        for scope in self.scope_stack.iter().rev() {
+            if let Some(info) = scope.get(name) {
+                return Some(info);
+            }
+        }
+        None
+    }
 }
 
 impl SemanticAnalyzer {
@@ -151,6 +165,9 @@ impl SemanticAnalyzer {
 
             // Statements
             AstNode::Assignment { pattern, value } => self.analyze_assignment(pattern, value),
+            AstNode::CompoundAssignment { pattern, op, value } => {
+                self.analyze_compound_assignment(pattern, *op, value)
+            }
             AstNode::Return { values } => {
                 // Check return value types
                 for v in values {

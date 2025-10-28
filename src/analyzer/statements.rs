@@ -2,6 +2,7 @@ use super::analyzer::SemanticAnalyzer;
 use super::types::{SemanticError, TypeMismatch};
 use crate::analyzer::analyzer::SymbolInfo;
 use crate::analyzer::types::NamedError;
+use crate::lexar::token::TokenType;
 use crate::parser::ast::{AstNode, Pattern, TypeNode};
 use std::collections::HashMap;
 
@@ -52,6 +53,87 @@ impl SemanticAnalyzer {
 
         // Add variables into the symbol table with their inferred types (for new declarations)
         self.bind_targets(&targets, &rhs_types);
+
+        Ok(())
+    }
+
+    /// Analyze a compound assignment statement (e.g., `x += 1`, `y *= 2`)
+    /// Checks that:
+    /// 1. The variable exists and is mutable
+    /// 2. The operation is valid for the variable's type
+    /// 3. The RHS type matches the variable's type
+    pub fn analyze_compound_assignment(
+        &mut self,
+        pattern: &Pattern,
+        op: TokenType,
+        value: &AstNode,
+    ) -> Result<(), SemanticError> {
+        // Only single identifier is allowed for compound assignment
+        let var_name = match pattern {
+            Pattern::Identifier(name) => name,
+            _ => {
+                return Err(SemanticError::InvalidAssignmentTarget {
+                    target: "Compound assignment only supports single variables".to_string(),
+                });
+            }
+        };
+
+        // Check if variable exists
+        let var_info = match self.symbol_table.get(var_name) {
+            Some(info) => info.clone(),
+            None => {
+                return Err(SemanticError::UndeclaredVariable(NamedError {
+                    name: var_name.clone(),
+                }));
+            }
+        };
+
+        // Check if variable is mutable
+        if !var_info.mutable {
+            return Err(SemanticError::InvalidAssignmentTarget {
+                target: format!("Cannot assign to immutable variable '{}'", var_name),
+            });
+        }
+
+        // Infer the type of the RHS expression
+        let rhs_type = self.infer_type(value)?;
+
+        // Check if the operation is valid for the variable's type
+        // Compound assignment requires both operands to be the same type
+        let result_type = match op {
+            TokenType::PlusEq | TokenType::MinusEq | TokenType::StarEq | TokenType::SlashEq => {
+                match (&var_info.ty, &rhs_type) {
+                    (TypeNode::Int, TypeNode::Int) => Ok(TypeNode::Int),
+                    (TypeNode::Float, TypeNode::Float) => Ok(TypeNode::Float),
+                    (TypeNode::String, TypeNode::String) if matches!(op, TokenType::PlusEq) => {
+                        Ok(TypeNode::String)
+                    }
+                    _ => Err(SemanticError::OperatorTypeMismatch(TypeMismatch {
+                        expected: var_info.ty.clone(),
+                        found: rhs_type.clone(),
+                        value: None,
+                        line: None,
+                        col: None,
+                    })),
+                }
+            }
+            _ => {
+                return Err(SemanticError::UnexpectedNode {
+                    expected: format!("Invalid compound assignment operator: {:?}", op),
+                });
+            }
+        }?;
+
+        // The result type should match the variable's type
+        if result_type != var_info.ty {
+            return Err(SemanticError::VarTypeMismatch(TypeMismatch {
+                expected: var_info.ty.clone(),
+                found: result_type,
+                value: None,
+                line: None,
+                col: None,
+            }));
+        }
 
         Ok(())
     }
@@ -273,10 +355,11 @@ impl SemanticAnalyzer {
             }));
         }
 
-        // Create a new scope for the 'then' block
+        // Create a new scope for the 'then' block that inherits from the current scope
         let saved_table = self.symbol_table.clone();
-        self.scope_stack.push(saved_table);
-        self.symbol_table = HashMap::new();
+        self.scope_stack.push(saved_table.clone());
+        // Keep the current symbol table so variables from outer scope are visible
+        // New variables declared in the then block will be added to this table
 
         // Analyze the 'then' block with its own scope
         self.analyze_program(then_block)?;
@@ -288,10 +371,10 @@ impl SemanticAnalyzer {
 
         // If there is an 'else' branch, analyze it with its own scope as well
         if let Some(else_node) = else_branch {
-            // Create a new scope for the 'else' branch
+            // Create a new scope for the 'else' branch that inherits from the current scope
             let else_saved_table = self.symbol_table.clone();
-            self.scope_stack.push(else_saved_table);
-            self.symbol_table = HashMap::new();
+            self.scope_stack.push(else_saved_table.clone());
+            // Keep the current symbol table so variables from outer scope are visible
 
             // Analyze the 'else' branch
             self.analyze_node(else_node)?;
