@@ -859,6 +859,85 @@ impl<'ctx> CodeGen<'ctx> {
                 Some(field_val)
             }
 
+            MirInstr::MapGet { name, map, key } => {
+                let map_ptr = self.resolve_value(map).into_pointer_value();
+                let key_val = self.resolve_value(key);
+
+                // Get map metadata to determine key and value types
+                if let Some(map_metadata_clone) = self.map_metadata.get(map).cloned() {
+                    let value_type_str = map_metadata_clone.value_type.clone();
+                    let value_is_string = map_metadata_clone.value_is_string;
+
+                    let value_type: BasicTypeEnum = match value_type_str.as_str() {
+                        "Str" => self
+                            .context
+                            .ptr_type(inkwell::AddressSpace::default())
+                            .into(),
+                        "Int" => self.context.i32_type().into(),
+                        "Bool" => self.context.bool_type().into(),
+                        _ => self.context.i32_type().into(),
+                    };
+
+                    // For now, simplified implementation: use the key_val as an index into the values array
+                    // This assumes integer keys for simplicity
+                    let index_val = key_val.into_int_value();
+
+                    // Direct indexing into map values array
+                    // For integer-keyed maps, we can directly use the index
+                    let elem_ptr = unsafe {
+                        self.builder.build_in_bounds_gep(
+                            value_type,
+                            map_ptr,
+                            &[index_val],
+                            "elem_ptr",
+                        )
+                    }
+                    .unwrap();
+
+                    let elem_val = self
+                        .builder
+                        .build_load(value_type, elem_ptr, "elem_val")
+                        .unwrap();
+
+                    let result_val = elem_val;
+
+                    // Handle RC for string values
+                    if value_is_string && value_type.is_pointer_type() {
+                        self.heap_strings.insert(name.clone());
+                        let str_ptr = result_val.into_pointer_value();
+                        let rc_header = unsafe {
+                            self.builder.build_in_bounds_gep(
+                                self.context.i8_type(),
+                                str_ptr,
+                                &[self.context.i32_type().const_int((-8_i32) as u64, true)],
+                                "rc_header",
+                            )
+                        }
+                        .unwrap();
+
+                        if let Some(incref_fn) = self.incref_fn {
+                            self.builder
+                                .build_call(incref_fn, &[rc_header.into()], "")
+                                .unwrap();
+                        }
+                    }
+
+                    // Store in temp_values
+                    self.temp_values.insert(name.clone(), result_val);
+
+                    if let Some(sym) = self.symbols.get(name) {
+                        self.builder.build_store(sym.ptr, result_val).unwrap();
+                    }
+
+                    Some(result_val)
+                } else {
+                    // Fallback: return 0
+                    let default = self.context.i32_type().const_int(0, false);
+                    self.temp_values.insert(name.clone(), default.into());
+                    Some(default.into())
+                }
+            }
+
             _ => None,
         }
     }
