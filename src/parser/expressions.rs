@@ -110,6 +110,11 @@ impl<'a> Parser<'a> {
                 }
                 TokenType::OpenBracket => self.parse_array_literal(),
                 TokenType::OpenBrace => self.parse_map_literal(),
+                TokenType::OpenParen => Err(ParseError::UnexpectedTokenAt {
+                    msg: "Parentheses are not allowed in expressions in mtlang".to_string(),
+                    line: tok.line,
+                    col: tok.col,
+                }),
                 _ => Err(ParseError::UnexpectedTokenAt {
                     msg: format!("Expected primary expression, got {:?}", tok.kind),
                     line: tok.line,
