@@ -146,10 +146,13 @@ impl<'a> Parser<'a> {
                 }
 
                 TokenType::Number | TokenType::Float => {
-                    // Allow number/float literals as statements (for testing, REPL, etc.)
-                    let expr = self.parse_expression()?;
-                    self.expect(TokenType::Semi)?;
-                    Ok(expr)
+                    // Disallow number/float literals as statements
+                    let tok = self.peek().unwrap();
+                    return Err(ParseError::UnexpectedTokenAt {
+                        msg: "Invalid expression as statement".to_string(),
+                        line: tok.line,
+                        col: tok.col,
+                    });
                 }
 
                 // If the token doesn't match any known statement start, check for Unknown token and handle error.
