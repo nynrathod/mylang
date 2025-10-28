@@ -215,7 +215,11 @@ impl<'a> Parser<'a> {
                 }
 
                 // Unexpected token in pattern context
-                _ => Err(ParseError::UnexpectedTokenAt { msg: format!("Unexpected token {:?} in pattern", tok.kind), line: tok.line, col: tok.col }),
+                _ => Err(ParseError::UnexpectedTokenAt {
+                    msg: format!("Unexpected token {:?} in pattern", tok.kind),
+                    line: tok.line,
+                    col: tok.col,
+                }),
             }
         } else {
             Err(ParseError::EndOfInput)
