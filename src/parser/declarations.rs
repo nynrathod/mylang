@@ -76,13 +76,17 @@ impl<'a> Parser<'a> {
         let params = self.parse_comma_separated(
             |p| {
                 let param_name = p.expect_ident()?;
-                let mut param_type = None;
-                if let Some(tok) = p.peek() {
-                    if tok.kind == TokenType::Colon {
-                        p.advance();
-                        param_type = Some(p.parse_type_annotation()?);
-                    }
+                // Enforce mandatory type annotation for each parameter
+                let tok = p.peek().ok_or(ParseError::EndOfInput)?;
+                if tok.kind != TokenType::Colon {
+                    return Err(ParseError::UnexpectedTokenAt {
+                        msg: "Function parameter type annotation is required".to_string(),
+                        line: tok.line,
+                        col: tok.col,
+                    });
                 }
+                p.advance(); // consume ':'
+                let param_type = Some(p.parse_type_annotation()?);
                 Ok((param_name, param_type))
             },
             TokenType::CloseParen,
