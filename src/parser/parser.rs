@@ -116,27 +116,55 @@ impl<'a> Parser<'a> {
                 TokenType::Print => self.parse_print(),
 
                 // Handles statements that start with an identifier.
-                // Could be assignment (x = 5;) or expression statement (abc();)
+                // Could be assignment (x = 5;) or compound assignment (x += 1;) or expression statement (abc();)
                 TokenType::Identifier => {
                     // Try to parse as expression first (handles function calls)
                     let expr = self.parse_expression()?;
 
-                    // Check if it's followed by '=' (assignment)
-                    if self.peek_is(TokenType::Eq) {
-                        self.advance(); // consume '='
-                        let value = self.parse_expression()?;
-                        self.expect(TokenType::Semi)?;
+                    // Check if it's followed by '=' or compound assignment operator
+                    if let Some(tok) = self.peek() {
+                        match tok.kind {
+                            TokenType::Eq => {
+                                self.advance(); // consume '='
+                                let value = self.parse_expression()?;
+                                self.expect(TokenType::Semi)?;
 
-                        // Extract identifier from expr for assignment
-                        if let AstNode::Identifier(name) = expr {
-                            return Ok(AstNode::Assignment {
-                                pattern: crate::parser::ast::Pattern::Identifier(name),
-                                value: Box::new(value),
-                            });
-                        } else {
-                            return Err(ParseError::UnexpectedToken(
-                                "Only single-variable assignment is allowed without 'let'".into(),
-                            ));
+                                // Extract identifier from expr for assignment
+                                if let AstNode::Identifier(name) = expr {
+                                    return Ok(AstNode::Assignment {
+                                        pattern: crate::parser::ast::Pattern::Identifier(name),
+                                        value: Box::new(value),
+                                    });
+                                } else {
+                                    return Err(ParseError::UnexpectedToken(
+                                        "Only single-variable assignment is allowed without 'let'".into(),
+                                    ));
+                                }
+                            }
+                            TokenType::PlusEq | TokenType::MinusEq | TokenType::StarEq | TokenType::SlashEq => {
+                                let op = tok.kind;
+                                self.advance(); // consume compound operator
+                                let value = self.parse_expression()?;
+                                self.expect(TokenType::Semi)?;
+
+                                // Extract identifier from expr for compound assignment
+                                if let AstNode::Identifier(name) = expr {
+                                    return Ok(AstNode::CompoundAssignment {
+                                        pattern: crate::parser::ast::Pattern::Identifier(name),
+                                        op,
+                                        value: Box::new(value),
+                                    });
+                                } else {
+                                    return Err(ParseError::UnexpectedToken(
+                                        "Only single-variable compound assignment is allowed".into(),
+                                    ));
+                                }
+                            }
+                            _ => {
+                                // It's an expression statement (like function call)
+                                self.expect(TokenType::Semi)?;
+                                return Ok(expr);
+                            }
                         }
                     } else {
                         // It's an expression statement (like function call)
