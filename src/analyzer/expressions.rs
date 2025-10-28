@@ -29,25 +29,20 @@ impl SemanticAnalyzer {
             // Boolean literal: always Bool type
             AstNode::BoolLiteral(_) => Ok(TypeNode::Bool),
 
-            // Identifier (variable name): look up in symbol table
+            // Identifier (variable name): look up in symbol table (with shadowing support)
             AstNode::Identifier(name) => {
-                if let Some(info) = self.symbol_table.get(name) {
+                if let Some(info) = self.lookup_variable(name) {
                     Ok(info.ty.clone())
+                } else if let Some(outer) = &self.outer_symbol_table {
+                    if outer.contains_key(name) {
+                        return Err(SemanticError::OutOfScopeVariable(NamedError {
+                            name: name.clone(),
+                        }));
+                    }
+                    Err(SemanticError::UndeclaredVariable(NamedError {
+                        name: name.clone(),
+                    }))
                 } else {
-                    // Walk up the scope stack to find the variable
-                    for scope in self.scope_stack.iter().rev() {
-                        if let Some(info) = scope.get(name) {
-                            return Ok(info.ty.clone());
-                        }
-                    }
-                    // Fallback to outer_symbol_table if present
-                    if let Some(outer) = &self.outer_symbol_table {
-                        if outer.contains_key(name) {
-                            return Err(SemanticError::OutOfScopeVariable(NamedError {
-                                name: name.clone(),
-                            }));
-                        }
-                    }
                     Err(SemanticError::UndeclaredVariable(NamedError {
                         name: name.clone(),
                     }))
@@ -293,6 +288,59 @@ impl SemanticAnalyzer {
 
                 // All keys and values are consistent: return Map type
                 Ok(TypeNode::Map(Box::new(key_type), Box::new(value_type)))
+            }
+
+            // Element access: arr[index] or map[key]
+            // Infer type of the array/map and the index/key
+            AstNode::ElementAccess { array, index } => {
+                let array_type = self.infer_type(array)?;
+                let index_type = self.infer_type(index)?;
+
+                match array_type {
+                    // Array element access: arr[Int] -> T
+                    TypeNode::Array(element_type) => {
+                        // Index must be an Int
+                        if index_type != TypeNode::Int {
+                            let (line, col) = get_node_location(index);
+                            return Err(SemanticError::OperatorTypeMismatch(TypeMismatch {
+                                expected: TypeNode::Int,
+                                found: index_type,
+                                value: None,
+                                line,
+                                col,
+                            }));
+                        }
+                        // Return the element type
+                        Ok(*element_type)
+                    }
+                    // Map element access: map[Key] -> Value
+                    TypeNode::Map(key_type, value_type) => {
+                        // Index must match the key type
+                        if index_type != *key_type {
+                            let (line, col) = get_node_location(index);
+                            return Err(SemanticError::OperatorTypeMismatch(TypeMismatch {
+                                expected: *key_type,
+                                found: index_type,
+                                value: None,
+                                line,
+                                col,
+                            }));
+                        }
+                        // Return the value type
+                        Ok(*value_type)
+                    }
+                    // Element access on non-indexable type
+                    _ => {
+                        let (line, col) = get_node_location(array);
+                        Err(SemanticError::OperatorTypeMismatch(TypeMismatch {
+                            expected: TypeNode::Array(Box::new(TypeNode::Int)),
+                            found: array_type,
+                            value: None,
+                            line,
+                            col,
+                        }))
+                    }
+                }
             }
 
             // Any other AST node (usually statements): return Void type.
