@@ -11,7 +11,7 @@ fn get_operand_type(builder: &MirBuilder, operand: &str) -> Option<TypeNode> {
 
 /// Helper function to determine the operation type for binary operations
 /// Returns "float" if either operand is float, "int" if both are int, or None for incompatible types
-fn determine_op_type(builder: &MirBuilder, lhs: &str, rhs: &str) -> Result<String, String> {
+pub fn determine_op_type(builder: &MirBuilder, lhs: &str, rhs: &str) -> Result<String, String> {
     let lhs_type = get_operand_type(builder, lhs);
     let rhs_type = get_operand_type(builder, rhs);
 
@@ -20,6 +20,7 @@ fn determine_op_type(builder: &MirBuilder, lhs: &str, rhs: &str) -> Result<Strin
         (Some(TypeNode::Float), Some(TypeNode::Int)) => Ok("float".to_string()),
         (Some(TypeNode::Int), Some(TypeNode::Float)) => Ok("float".to_string()),
         (Some(TypeNode::Int), Some(TypeNode::Int)) => Ok("int".to_string()),
+        (Some(TypeNode::Bool), Some(TypeNode::Bool)) => Ok("bool".to_string()),
         (Some(TypeNode::String), Some(TypeNode::String)) => Ok("string".to_string()),
         (Some(TypeNode::String), _) | (_, Some(TypeNode::String)) => {
             Err(format!("Cannot perform arithmetic on string types"))
@@ -163,7 +164,7 @@ pub fn build_expression(builder: &mut MirBuilder, expr: &AstNode, block: &mut Mi
                             }
                         }
                     } else {
-                        // Other binary operators (sub, mul, div, comparisons, etc.).
+                        // Other binary operators (sub, mul, div, comparisons, logical, etc.).
                         let op_str = match op {
                             TokenType::Minus => "sub",
                             TokenType::Star => "mul",
@@ -175,6 +176,8 @@ pub fn build_expression(builder: &mut MirBuilder, expr: &AstNode, block: &mut Mi
                             TokenType::EqEq => "eq",
                             TokenType::NotEq => "ne",
                             TokenType::Percent => "rem",
+                            TokenType::AndAnd => "and",
+                            TokenType::OrOr => "or",
                             _ => "unknown",
                         }
                         .to_string();
@@ -191,10 +194,10 @@ pub fn build_expression(builder: &mut MirBuilder, expr: &AstNode, block: &mut Mi
                                     lhs_tmp,
                                     rhs_tmp,
                                 ));
-                                // Track result type - comparisons return bool, others return the operand type
+                                // Track result type - comparisons and logical ops return bool, others return the operand type
                                 if matches!(
                                     op_str.as_str(),
-                                    "eq" | "ne" | "lt" | "le" | "gt" | "ge"
+                                    "eq" | "ne" | "lt" | "le" | "gt" | "ge" | "and" | "or"
                                 ) {
                                     builder
                                         .mir_symbol_table
@@ -285,6 +288,52 @@ pub fn build_expression(builder: &mut MirBuilder, expr: &AstNode, block: &mut Mi
             };
             builder.mir_symbol_table.insert(tmp.clone(), map_type);
             tmp
+        }
+
+        // Element access: arr[index] or map[key]
+        AstNode::ElementAccess { array, index } => {
+            let array_tmp = build_expression(builder, array, block);
+            let index_tmp = build_expression(builder, index, block);
+
+            // Check if it's an array or map access by looking up the type
+            let array_type = get_operand_type(builder, &array_tmp);
+
+            match array_type {
+                // Array element access
+                Some(TypeNode::Array(_)) => {
+                    let result_tmp = builder.next_tmp();
+                    block.instrs.push(MirInstr::ArrayGet {
+                        name: result_tmp.clone(),
+                        array: array_tmp,
+                        index: index_tmp,
+                    });
+                    result_tmp
+                }
+                // Map element access
+                Some(TypeNode::Map(_, value_type)) => {
+                    let result_tmp = builder.next_tmp();
+                    block.instrs.push(MirInstr::MapGet {
+                        name: result_tmp.clone(),
+                        map: array_tmp,
+                        key: index_tmp,
+                    });
+                    // Track the value type
+                    builder
+                        .mir_symbol_table
+                        .insert(result_tmp.clone(), *value_type);
+                    result_tmp
+                }
+                // Fallback: treat as array access
+                _ => {
+                    let result_tmp = builder.next_tmp();
+                    block.instrs.push(MirInstr::ArrayGet {
+                        name: result_tmp.clone(),
+                        array: array_tmp,
+                        index: index_tmp,
+                    });
+                    result_tmp
+                }
+            }
         }
 
         _ => {

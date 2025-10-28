@@ -162,6 +162,16 @@ impl<'ctx> CodeGen<'ctx> {
                         .build_int_compare(IntPredicate::SGE, lhs_int, rhs_int, "ge_tmp")
                         .unwrap()
                         .into(),
+                    "and" => self
+                        .builder
+                        .build_and(lhs_int, rhs_int, "and_tmp")
+                        .unwrap()
+                        .into(),
+                    "or" => self
+                        .builder
+                        .build_or(lhs_int, rhs_int, "or_tmp")
+                        .unwrap()
+                        .into(),
                     _ => panic!("Unsupported int binary op: {}", op),
                 }
             } else {
