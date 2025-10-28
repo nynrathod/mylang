@@ -8,6 +8,8 @@ pub struct TypeMismatch {
     pub expected: TypeNode,
     pub found: TypeNode,
     pub value: Option<Box<AstNode>>,
+    pub line: Option<usize>,
+    pub col: Option<usize>,
 }
 
 #[derive(Debug)]
