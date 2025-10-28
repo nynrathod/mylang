@@ -16,8 +16,17 @@ impl<'a> Parser<'a> {
     fn parse_expression_prec(&mut self, min_prec: u8) -> ParseResult<AstNode> {
         let mut left = if let Some(tok) = self.peek() {
             match tok.kind {
-                // 🟡 TODO: Handles: -a, !b, +c (Not supported yet)
-                TokenType::Bang | TokenType::Minus | TokenType::Plus => {
+                // Disallow unary '!' operator
+                TokenType::Bang => {
+                    let tok = self.advance().unwrap();
+                    return Err(ParseError::UnexpectedTokenAt {
+                        msg: "Unary '!' operator is not allowed in doolang".to_string(),
+                        line: tok.line,
+                        col: tok.col,
+                    });
+                }
+                // Allow unary minus and plus if desired
+                TokenType::Minus | TokenType::Plus => {
                     let op = tok.kind;
                     self.advance(); // consume operator
                     let expr = self.parse_expression_prec(7)?; // unary has high precedence
@@ -33,6 +42,10 @@ impl<'a> Parser<'a> {
         } else {
             return Err(ParseError::EndOfInput);
         };
+
+        // Postfix operations: array/map element access
+        // Handles: arr[0], map["key"], nested[i][j], etc.
+        left = self.parse_postfix(left)?;
 
         // Binary operator expressions:
         // Handles: a + b, x * y - z, a < b, a <= b, a > b, a >= b
@@ -64,6 +77,22 @@ impl<'a> Parser<'a> {
         }
 
         Ok(left)
+    }
+
+    /// Parses postfix operations on an expression.
+    /// Handles array/map element access: arr[0], map["key"], nested[i][j]
+    /// Can be chained: arr[0][1][2]
+    fn parse_postfix(&mut self, mut expr: AstNode) -> ParseResult<AstNode> {
+        while self.peek_is(TokenType::OpenBracket) {
+            self.advance(); // consume '['
+            let index = self.parse_expression()?;
+            self.expect(TokenType::CloseBracket)?;
+            expr = AstNode::ElementAccess {
+                array: Box::new(expr),
+                index: Box::new(index),
+            };
+        }
+        Ok(expr)
     }
 
     /// Handles literals (number, string, boolean), identifiers
