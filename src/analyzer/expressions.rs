@@ -25,7 +25,15 @@ impl SemanticAnalyzer {
             // Float literal: always Float type
             AstNode::FloatLiteral(_) => Ok(TypeNode::Float),
             // String literal: always String type
-            AstNode::StringLiteral(_) => Ok(TypeNode::String),
+            AstNode::StringLiteral(s) => {
+                // Reject string interpolation syntax ${...}
+                if s.contains("${") {
+                    return Err(SemanticError::UndeclaredFunction(NamedError {
+                        name: "String interpolation with ${...} is not supported".to_string(),
+                    }));
+                }
+                Ok(TypeNode::String)
+            }
             // Boolean literal: always Bool type
             AstNode::BoolLiteral(_) => Ok(TypeNode::Bool),
 
@@ -171,7 +179,41 @@ impl SemanticAnalyzer {
             // Ex., let neg = -x;
             // Ex., let not = !flag;
             // TODO: check llvm handled for this or not
-            AstNode::UnaryExpr { expr, .. } => self.infer_type(expr),
+            AstNode::UnaryExpr { op, expr } => {
+                let expr_type = self.infer_type(expr)?;
+                match op {
+                    TokenType::Minus => match expr_type {
+                        TypeNode::Int | TypeNode::Float => Ok(expr_type),
+                        _ => {
+                            let (line, col) = get_node_location(expr);
+                            Err(SemanticError::OperatorTypeMismatch(TypeMismatch {
+                                expected: TypeNode::Int,
+                                found: expr_type,
+                                value: None,
+                                line,
+                                col,
+                            }))
+                        }
+                    },
+                    TokenType::Bang => {
+                        if expr_type == TypeNode::Bool {
+                            Ok(TypeNode::Bool)
+                        } else {
+                            let (line, col) = get_node_location(expr);
+                            Err(SemanticError::OperatorTypeMismatch(TypeMismatch {
+                                expected: TypeNode::Bool,
+                                found: expr_type,
+                                value: None,
+                                line,
+                                col,
+                            }))
+                        }
+                    }
+                    _ => Err(SemanticError::UnexpectedNode {
+                        expected: "Minus or Bang operator".to_string(),
+                    }),
+                }
+            }
 
             // Function call: infer return type from function signature
             // Ex., let result = myFunction(1, "abc");
@@ -295,6 +337,17 @@ impl SemanticAnalyzer {
             AstNode::ElementAccess { array, index } => {
                 let array_type = self.infer_type(array)?;
                 let index_type = self.infer_type(index)?;
+
+                // Reject negative indices for arrays
+                if let AstNode::UnaryExpr {
+                    op: TokenType::Minus,
+                    expr: _,
+                } = &**index
+                {
+                    return Err(SemanticError::InvalidAssignmentTarget {
+                        target: "Array indices cannot be negative".to_string(),
+                    });
+                }
 
                 match array_type {
                     // Array element access: arr[Int] -> T

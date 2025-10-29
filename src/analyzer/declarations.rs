@@ -94,10 +94,13 @@ impl SemanticAnalyzer {
                                 // If in a nested scope, allow shadowing but not redeclaration in same scope
                                 if self.scope_stack.is_empty() {
                                     // Top-level scope - no redeclaration allowed
-                                    if self.symbol_table.contains_key(name) {
-                                        return Err(SemanticError::VariableRedeclaration(
-                                            NamedError { name: name.clone() },
-                                        ));
+                                    // Exception: allow shadowing of parameters
+                                    if let Some(existing) = self.symbol_table.get(name) {
+                                        if !existing.is_parameter {
+                                            return Err(SemanticError::VariableRedeclaration(
+                                                NamedError { name: name.clone() },
+                                            ));
+                                        }
                                     }
                                 }
                                 // If in nested scope, allow shadowing - don't check at all for now
@@ -110,6 +113,7 @@ impl SemanticAnalyzer {
                                         ty: ty.clone(),
                                         mutable: *mutable,
                                         is_ref_counted: Self::should_be_rc(&ty),
+                                        is_parameter: false,
                                     },
                                 );
                             }
@@ -189,8 +193,9 @@ impl SemanticAnalyzer {
                 param_name.clone(),
                 SymbolInfo {
                     ty: param_type.clone(),
-                    mutable: false,
+                    mutable: true,
                     is_ref_counted: Self::should_be_rc(&param_type),
+                    is_parameter: true,
                 },
             );
         }
@@ -230,6 +235,7 @@ impl SemanticAnalyzer {
             }
         }
 
+        self.function_depth += 1;
         // Analyze function body with isolated scope.
         self.analyze_program(body)?;
 
@@ -242,6 +248,7 @@ impl SemanticAnalyzer {
 
         // Restore outer scope after function analysis.
         if let Some(outer) = self.outer_symbol_table.take() {
+        self.function_depth -= 1;
             self.symbol_table = outer;
         }
 
@@ -457,6 +464,7 @@ impl SemanticAnalyzer {
                     ty: TypeNode::Struct(name.clone(), field_map),
                     mutable: false,
                     is_ref_counted: true,
+                    is_parameter: false,
                 },
             );
         }
@@ -494,6 +502,7 @@ impl SemanticAnalyzer {
                     ty: TypeNode::Enum(name.clone(), variant_map),
                     mutable: false,
                     is_ref_counted: true,
+                    is_parameter: false,
                 },
             );
         }

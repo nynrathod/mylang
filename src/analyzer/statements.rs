@@ -101,22 +101,24 @@ impl SemanticAnalyzer {
         // Check if the operation is valid for the variable's type
         // Compound assignment requires both operands to be the same type
         let result_type = match op {
-            TokenType::PlusEq | TokenType::MinusEq | TokenType::StarEq | TokenType::SlashEq => {
-                match (&var_info.ty, &rhs_type) {
-                    (TypeNode::Int, TypeNode::Int) => Ok(TypeNode::Int),
-                    (TypeNode::Float, TypeNode::Float) => Ok(TypeNode::Float),
-                    (TypeNode::String, TypeNode::String) if matches!(op, TokenType::PlusEq) => {
-                        Ok(TypeNode::String)
-                    }
-                    _ => Err(SemanticError::OperatorTypeMismatch(TypeMismatch {
-                        expected: var_info.ty.clone(),
-                        found: rhs_type.clone(),
-                        value: None,
-                        line: None,
-                        col: None,
-                    })),
+            TokenType::PlusEq
+            | TokenType::MinusEq
+            | TokenType::StarEq
+            | TokenType::SlashEq
+            | TokenType::PercentEq => match (&var_info.ty, &rhs_type) {
+                (TypeNode::Int, TypeNode::Int) => Ok(TypeNode::Int),
+                (TypeNode::Float, TypeNode::Float) => Ok(TypeNode::Float),
+                (TypeNode::String, TypeNode::String) if matches!(op, TokenType::PlusEq) => {
+                    Ok(TypeNode::String)
                 }
-            }
+                _ => Err(SemanticError::OperatorTypeMismatch(TypeMismatch {
+                    expected: var_info.ty.clone(),
+                    found: rhs_type.clone(),
+                    value: None,
+                    line: None,
+                    col: None,
+                })),
+            },
             _ => {
                 return Err(SemanticError::UnexpectedNode {
                     expected: format!("Invalid compound assignment operator: {:?}", op),
@@ -190,6 +192,7 @@ impl SemanticAnalyzer {
                             ty: ty.clone(),
                             mutable: true,
                             is_ref_counted: Self::should_be_rc(&ty),
+                            is_parameter: false,
                         },
                     );
                 }
@@ -513,13 +516,14 @@ impl SemanticAnalyzer {
                         name: name.clone(),
                     }));
                 }
-                
+
                 // Add the variable to the symbol table
                 self.symbol_table.insert(
                     name.clone(),
                     SymbolInfo {
                         ty: ty.clone(),
                         mutable: false,
+                        is_parameter: false,
                         is_ref_counted: Self::should_be_rc(&ty),
                     },
                 );
