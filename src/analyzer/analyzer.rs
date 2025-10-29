@@ -9,6 +9,7 @@ pub struct SymbolInfo {
     pub ty: TypeNode,         // The type of the variable
     pub mutable: bool,        // Is the variable mutable?
     pub is_ref_counted: bool, // Should reference counting be used?
+    pub is_parameter: bool,   // Is this variable a function parameter?
 }
 
 /// The main semantic analyzer for the language.
@@ -23,8 +24,8 @@ pub struct SemanticAnalyzer {
     pub imported_functions: Vec<AstNode>, // Store imported function AST nodes for MIR generation
     pub loop_depth: usize,                // Track loop nesting for break/continue error handling
     pub scope_stack: Vec<HashMap<String, SymbolInfo>>, // Scope stack for block scoping
-
-    pub scope_sizes_stack: Vec<usize>, // Track symbol table size at each scope level
+    pub function_depth: usize,            // Track function nesting for return statement validation
+    pub scope_sizes_stack: Vec<usize>,    // Track symbol table size at each scope level
     pub collected_errors: Vec<SemanticError>, // Collect all errors for reporting
 }
 
@@ -60,6 +61,7 @@ impl SemanticAnalyzer {
             imported_functions: Vec::new(),
             loop_depth: 0,
             scope_stack: Vec::new(),
+            function_depth: 0,
             scope_sizes_stack: Vec::new(),
             collected_errors: Vec::new(), // Initialize error collection
         }
@@ -171,6 +173,12 @@ impl SemanticAnalyzer {
                 self.analyze_compound_assignment(pattern, *op, value)
             }
             AstNode::Return { values } => {
+                // Check that return is inside a function
+                if self.function_depth == 0 {
+                    return Err(SemanticError::UndeclaredFunction(NamedError {
+                        name: "return statement outside of function".to_string(),
+                    }));
+                }
                 // Check return value types
                 for v in values {
                     self.infer_type(v)?;
@@ -212,15 +220,15 @@ impl SemanticAnalyzer {
                 let scope_size = self.symbol_table.len();
                 self.scope_stack.push(HashMap::new()); // Marker for block scope
                 self.scope_sizes_stack.push(scope_size);
-                
+
                 // Analyze block - variables declared here go into symbol_table
                 let result = self.analyze_program(nodes);
-                
+
                 // Restore symbol table to parent scope (removes block variables)
                 self.scope_stack.pop();
                 self.scope_sizes_stack.pop();
                 self.symbol_table = parent_scope;
-                
+
                 result
             }
 
