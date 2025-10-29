@@ -355,34 +355,35 @@ impl SemanticAnalyzer {
             }));
         }
 
-        // Create a new scope for the 'then' block that inherits from the current scope
-        let saved_table = self.symbol_table.clone();
-        self.scope_stack.push(saved_table.clone());
-        // Keep the current symbol table so variables from outer scope are visible
-        // New variables declared in the then block will be added to this table
+        // Create a new scope for the 'then' block
+        let then_parent_scope = self.symbol_table.clone();
+        self.scope_stack.push(HashMap::new());
+        let scope_size = self.symbol_table.len();
+        self.scope_sizes_stack.push(scope_size);
 
         // Analyze the 'then' block with its own scope
         self.analyze_program(then_block)?;
 
-        // Restore the original symbol table to ensure variables from 'then' block don't leak
-        if let Some(prev_scope) = self.scope_stack.pop() {
-            self.symbol_table = prev_scope;
-        }
+        // Restore symbol table to remove then block variables
+        self.scope_stack.pop();
+        self.scope_sizes_stack.pop();
+        self.symbol_table = then_parent_scope;
 
         // If there is an 'else' branch, analyze it with its own scope as well
         if let Some(else_node) = else_branch {
-            // Create a new scope for the 'else' branch that inherits from the current scope
-            let else_saved_table = self.symbol_table.clone();
-            self.scope_stack.push(else_saved_table.clone());
-            // Keep the current symbol table so variables from outer scope are visible
+            // Create a new scope for the 'else' branch
+            let else_parent_scope = self.symbol_table.clone();
+            self.scope_stack.push(HashMap::new());
+            let scope_size = self.symbol_table.len();
+            self.scope_sizes_stack.push(scope_size);
 
             // Analyze the 'else' branch
             self.analyze_node(else_node)?;
 
-            // Restore the symbol table after analyzing the 'else' branch
-            if let Some(prev_scope) = self.scope_stack.pop() {
-                self.symbol_table = prev_scope;
-            }
+            // Restore symbol table to remove else branch variables
+            self.scope_stack.pop();
+            self.scope_sizes_stack.pop();
+            self.symbol_table = else_parent_scope;
         }
 
         Ok(())
@@ -403,13 +404,11 @@ impl SemanticAnalyzer {
         iterable: Option<&mut AstNode>,
         body: &mut Vec<AstNode>,
     ) -> Result<(), SemanticError> {
-        // Save the outer symbol table and create a new scope for the loop.
-        let outer_table = self.symbol_table.clone();
-        let mut loop_scope = outer_table.clone();
-        // Swap the current symbol table with the loop scope.
-        // This ensures variables declared inside the loop are scoped to the loop body
-        // and do not leak into the outer scope. We'll restore the outer scope after analysis.
-        std::mem::swap(&mut self.symbol_table, &mut loop_scope);
+        // Create a new scope for the loop body
+        let parent_scope = self.symbol_table.clone();
+        self.scope_stack.push(parent_scope.clone());
+        let scope_size = self.symbol_table.len();
+        self.scope_sizes_stack.push(scope_size);
 
         if let Some(iter_node) = iterable {
             // Infer the type of the iterable expression.
@@ -446,7 +445,7 @@ impl SemanticAnalyzer {
                         return Err(SemanticError::InvalidAssignmentTarget {
                             target: "Expected tuple pattern (key, value) when iterating a map"
                                 .to_string(),
-                        })
+                        });
                     }
                 },
                 TypeNode::Range(_, _, _) => {
@@ -487,8 +486,12 @@ impl SemanticAnalyzer {
         self.analyze_program(body)?;
         // Decrement loop depth after analyzing the loop body
         self.loop_depth -= 1;
-        // Restore the outer symbol table after the loop.
-        self.symbol_table = outer_table;
+        // Pop scope and restore symbol table
+        self.scope_sizes_stack.pop();
+        if let Some(prev_scope) = self.scope_stack.pop() {
+            self.symbol_table = prev_scope;
+        }
+
         Ok(())
     }
 
@@ -504,13 +507,14 @@ impl SemanticAnalyzer {
     ) -> Result<(), SemanticError> {
         match pattern {
             Pattern::Identifier(name) => {
-                // If the variable is already declared in the current scope, return an error.
+                // Check if variable already declared - prevents redeclaration in same scope
                 if self.symbol_table.contains_key(name) {
                     return Err(SemanticError::VariableRedeclaration(NamedError {
                         name: name.clone(),
                     }));
                 }
-                // Add the variable to the symbol table with the given type.
+                
+                // Add the variable to the symbol table
                 self.symbol_table.insert(
                     name.clone(),
                     SymbolInfo {

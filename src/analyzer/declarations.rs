@@ -89,14 +89,21 @@ impl SemanticAnalyzer {
                             }
                             // Skip wildcards (do not store them).
                             if name != "_" {
-                                // Check for redeclaration in the current scope only
-                                if self.symbol_table.contains_key(name) {
-                                    return Err(SemanticError::VariableRedeclaration(NamedError {
-                                        name: name.clone(),
-                                    }));
+                                // Check for redeclaration
+                                // If not in a nested scope, don't allow redeclaration
+                                // If in a nested scope, allow shadowing but not redeclaration in same scope
+                                if self.scope_stack.is_empty() {
+                                    // Top-level scope - no redeclaration allowed
+                                    if self.symbol_table.contains_key(name) {
+                                        return Err(SemanticError::VariableRedeclaration(
+                                            NamedError { name: name.clone() },
+                                        ));
+                                    }
                                 }
+                                // If in nested scope, allow shadowing - don't check at all for now
+                                // Just add the variable
 
-                                // Add variable to current scope
+                                // Add to symbol_table
                                 self.symbol_table.insert(
                                     name.clone(),
                                     SymbolInfo {

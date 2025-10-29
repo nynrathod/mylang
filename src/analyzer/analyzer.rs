@@ -24,6 +24,7 @@ pub struct SemanticAnalyzer {
     pub loop_depth: usize,                // Track loop nesting for break/continue error handling
     pub scope_stack: Vec<HashMap<String, SymbolInfo>>, // Scope stack for block scoping
 
+    pub scope_sizes_stack: Vec<usize>, // Track symbol table size at each scope level
     pub collected_errors: Vec<SemanticError>, // Collect all errors for reporting
 }
 
@@ -59,6 +60,7 @@ impl SemanticAnalyzer {
             imported_functions: Vec::new(),
             loop_depth: 0,
             scope_stack: Vec::new(),
+            scope_sizes_stack: Vec::new(),
             collected_errors: Vec::new(), // Initialize error collection
         }
     }
@@ -205,16 +207,20 @@ impl SemanticAnalyzer {
                 body,
             } => self.analyze_for_stmt(pattern, iterable.as_deref_mut(), body),
             AstNode::Block(nodes) => {
-                // Save the current symbol table (scope)
+                // Save the current symbol table to restore after block
                 let parent_scope = self.symbol_table.clone();
-                // Push current scope onto stack and start with a fresh scope for the block
-                self.scope_stack.push(parent_scope.clone());
-                self.symbol_table = HashMap::new();
+                let scope_size = self.symbol_table.len();
+                self.scope_stack.push(HashMap::new()); // Marker for block scope
+                self.scope_sizes_stack.push(scope_size);
+                
+                // Analyze block - variables declared here go into symbol_table
                 let result = self.analyze_program(nodes);
-                // Pop scope from stack and restore
-                if let Some(prev_scope) = self.scope_stack.pop() {
-                    self.symbol_table = prev_scope;
-                }
+                
+                // Restore symbol table to parent scope (removes block variables)
+                self.scope_stack.pop();
+                self.scope_sizes_stack.pop();
+                self.symbol_table = parent_scope;
+                
                 result
             }
 
