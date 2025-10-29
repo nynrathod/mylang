@@ -25,6 +25,27 @@ pub fn determine_op_type(builder: &MirBuilder, lhs: &str, rhs: &str) -> Result<S
         (Some(TypeNode::String), _) | (_, Some(TypeNode::String)) => {
             Err(format!("Cannot perform arithmetic on string types"))
         }
+        // Support array comparisons if element types match
+        (Some(TypeNode::Array(lhs_elem)), Some(TypeNode::Array(rhs_elem))) => {
+            if lhs_elem == rhs_elem {
+                Ok("array".to_string())
+            } else {
+                Err(format!(
+                    "Type mismatch: cannot compare Array({:?}) with Array({:?})",
+                    lhs_elem, rhs_elem
+                ))
+            }
+        }
+        // Support map comparisons if key and value types match
+        (Some(TypeNode::Map(lhs_key, lhs_val)), Some(TypeNode::Map(rhs_key, rhs_val))) => {
+            if lhs_key == rhs_key && lhs_val == rhs_val {
+                Ok("map".to_string())
+            } else {
+                Err(format!(
+                    "Type mismatch: cannot compare Map types with different key/value types"
+                ))
+            }
+        }
         (Some(lhs_t), Some(rhs_t)) => Err(format!(
             "Type mismatch: cannot operate on {:?} and {:?}",
             lhs_t, rhs_t
@@ -86,6 +107,76 @@ pub fn build_expression(builder: &mut MirBuilder, expr: &AstNode, block: &mut Mi
         }
 
         AstNode::Identifier(name) => name.clone(),
+
+        AstNode::UnaryExpr { op, expr } => {
+            let expr_tmp = build_expression(builder, expr, block);
+            let tmp = builder.next_tmp();
+
+            match op {
+                TokenType::Minus => {
+                    // Negation: negate the operand
+                    // Create a negate operation (0 - expr)
+                    let zero_tmp = builder.next_tmp();
+                    block.instrs.push(MirInstr::ConstInt {
+                        name: zero_tmp.clone(),
+                        value: 0,
+                    });
+                    builder
+                        .mir_symbol_table
+                        .insert(zero_tmp.clone(), TypeNode::Int);
+
+                    // Determine operation type based on operand
+                    let op_type =
+                        if let Some(TypeNode::Float) = builder.mir_symbol_table.get(&expr_tmp) {
+                            "float".to_string()
+                        } else {
+                            "int".to_string()
+                        };
+
+                    block.instrs.push(MirInstr::BinaryOp(
+                        format!("sub:{}", op_type),
+                        tmp.clone(),
+                        zero_tmp,
+                        expr_tmp.clone(),
+                    ));
+
+                    // Track result type
+                    if let Some(expr_type) = builder.mir_symbol_table.get(&expr_tmp) {
+                        builder
+                            .mir_symbol_table
+                            .insert(tmp.clone(), expr_type.clone());
+                    } else {
+                        builder.mir_symbol_table.insert(tmp.clone(), TypeNode::Int);
+                    }
+
+                    tmp
+                }
+                TokenType::Bang => {
+                    // Logical NOT: !expr
+                    // Implement as: expr != true (or expr == false)
+                    let true_tmp = builder.next_tmp();
+                    block.instrs.push(MirInstr::ConstBool {
+                        name: true_tmp.clone(),
+                        value: true,
+                    });
+                    builder
+                        .mir_symbol_table
+                        .insert(true_tmp.clone(), TypeNode::Bool);
+
+                    block.instrs.push(MirInstr::BinaryOp(
+                        "ne:bool".to_string(),
+                        tmp.clone(),
+                        expr_tmp,
+                        true_tmp,
+                    ));
+                    builder.mir_symbol_table.insert(tmp.clone(), TypeNode::Bool);
+                    tmp
+                }
+                _ => {
+                    panic!("Unsupported unary operator: {:?}", op);
+                }
+            }
+        }
 
         AstNode::BinaryExpr { left, op, right } => {
             // Special handling for range expressions (.., ..=) used in for loops.
@@ -250,8 +341,16 @@ pub fn build_expression(builder: &mut MirBuilder, expr: &AstNode, block: &mut Mi
 
         AstNode::ArrayLiteral(elements) => {
             let mut tmp_elements = vec![];
+            let mut element_type = TypeNode::Int; // Default element type
+
             for elem in elements {
                 let elem_tmp = build_expression(builder, elem, block);
+                // Track the type of the first element to use for the array
+                if tmp_elements.is_empty() {
+                    if let Some(elem_t) = get_operand_type(builder, &elem_tmp) {
+                        element_type = elem_t;
+                    }
+                }
                 tmp_elements.push(elem_tmp);
             }
 
@@ -260,18 +359,30 @@ pub fn build_expression(builder: &mut MirBuilder, expr: &AstNode, block: &mut Mi
                 name: tmp.clone(),
                 elements: tmp_elements,
             });
-            // Track type in symbol table (simplified - could track element type)
+            // Track type in symbol table with proper element type
             builder
                 .mir_symbol_table
-                .insert(tmp.clone(), TypeNode::Array(Box::new(TypeNode::Void)));
+                .insert(tmp.clone(), TypeNode::Array(Box::new(element_type)));
             tmp
         }
 
         AstNode::MapLiteral(entries) => {
             let mut map_entries = vec![];
+            let mut key_type = TypeNode::String; // Default key type
+            let mut value_type = TypeNode::Int; // Default value type
+
             for (key_expr, val_expr) in entries {
                 let key_tmp = build_expression(builder, key_expr, block);
                 let val_tmp = build_expression(builder, val_expr, block);
+                // Track types from first entry
+                if map_entries.is_empty() {
+                    if let Some(k_t) = get_operand_type(builder, &key_tmp) {
+                        key_type = k_t;
+                    }
+                    if let Some(v_t) = get_operand_type(builder, &val_tmp) {
+                        value_type = v_t;
+                    }
+                }
                 map_entries.push((key_tmp, val_tmp));
             }
 
@@ -280,12 +391,8 @@ pub fn build_expression(builder: &mut MirBuilder, expr: &AstNode, block: &mut Mi
                 name: tmp.clone(),
                 entries: map_entries,
             });
-            // Track type in symbol table: for empty maps, use default String, Int
-            let map_type = if entries.is_empty() {
-                TypeNode::Map(Box::new(TypeNode::String), Box::new(TypeNode::Int))
-            } else {
-                TypeNode::Map(Box::new(TypeNode::Void), Box::new(TypeNode::Void))
-            };
+            // Track type in symbol table with actual key and value types
+            let map_type = TypeNode::Map(Box::new(key_type), Box::new(value_type));
             builder.mir_symbol_table.insert(tmp.clone(), map_type);
             tmp
         }
