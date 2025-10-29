@@ -39,6 +39,44 @@ impl<'ctx> CodeGen<'ctx> {
             });
         }
 
+        // Handle array and map comparisons (only eq and ne are supported)
+        if (op_type == "array" || op_type == "map")
+            && lhs_val.is_pointer_value()
+            && rhs_val.is_pointer_value()
+        {
+            let lhs_ptr = lhs_val.into_pointer_value();
+            let rhs_ptr = rhs_val.into_pointer_value();
+
+            // For array/map comparisons, we compare pointer values using ptrtoint
+            let ptr_type = self.context.i64_type();
+            let lhs_int = self
+                .builder
+                .build_ptr_to_int(lhs_ptr, ptr_type, "lhs_ptr_int")
+                .unwrap();
+            let rhs_int = self
+                .builder
+                .build_ptr_to_int(rhs_ptr, ptr_type, "rhs_ptr_int")
+                .unwrap();
+
+            let result = if op_name == "eq" {
+                self.builder
+                    .build_int_compare(inkwell::IntPredicate::EQ, lhs_int, rhs_int, "array_eq_tmp")
+                    .unwrap()
+            } else if op_name == "ne" {
+                self.builder
+                    .build_int_compare(inkwell::IntPredicate::NE, lhs_int, rhs_int, "array_ne_tmp")
+                    .unwrap()
+            } else {
+                panic!("Only eq and ne operations are supported for arrays/maps");
+            };
+
+            self.temp_values.insert(dst.to_string(), result.into());
+            if let Some(sym) = self.symbols.get(dst) {
+                self.builder.build_store(sym.ptr, result).unwrap();
+            }
+            return Some(result.into());
+        }
+
         let res: BasicValueEnum<'ctx> = if op_type == "float" {
             if lhs_val.is_float_value() && rhs_val.is_float_value() {
                 let lhs_float = lhs_val.into_float_value();
