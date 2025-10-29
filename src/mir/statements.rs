@@ -111,6 +111,7 @@ pub fn build_statement(builder: &mut MirBuilder, stmt: &AstNode, block: &mut Mir
                     TokenType::MinusEq => "sub",
                     TokenType::StarEq => "mul",
                     TokenType::SlashEq => "div",
+                    TokenType::PercentEq => "mod",
                     _ => return, // Should not happen due to parser validation
                 };
 
