@@ -287,7 +287,7 @@ pub fn lex(input: &str) -> Vec<Token<'_>> {
                 .unwrap_or(&TokenType::Identifier);
 
             // Disallow identifiers starting with underscore
-            if word.starts_with('_') {
+            if word.contains('_') {
                 tokens.push(Token {
                     kind: TokenType::Unknown,
                     value: Box::leak(word.clone().into_boxed_str()),

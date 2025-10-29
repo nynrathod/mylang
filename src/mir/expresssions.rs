@@ -175,7 +175,7 @@ pub fn build_expression(builder: &mut MirBuilder, expr: &AstNode, block: &mut Mi
                             TokenType::LtEq => "le",
                             TokenType::EqEq => "eq",
                             TokenType::NotEq => "ne",
-                            TokenType::Percent => "rem",
+                            TokenType::Percent => "mod",
                             TokenType::AndAnd => "and",
                             TokenType::OrOr => "or",
                             _ => "unknown",
