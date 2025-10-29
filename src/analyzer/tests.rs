@@ -46,12 +46,6 @@ mod analyzer_tests {
     }
 
     #[test]
-    fn test_identifier_with_underscore() {
-        let input = "fn main() { let my_var = 1; }";
-        assert!(analyze_code(input).is_ok());
-    }
-
-    #[test]
     fn test_all_keywords() {
         let input = "fn main() { let mut fn if else for in return break continue struct enum import print; }";
         // Accepts or rejects depending on implementation, so allow both
@@ -128,6 +122,13 @@ mod analyzer_tests {
     }
 
     // Invalid function declarations
+    // Its ok to pass in lexar, will fail in anlyzer
+    #[test]
+    fn test_identifier_with_underscore() {
+        let input = "fn main() { let my_var = 1; }";
+        assert!(analyze_code(input).is_err());
+    }
+
     #[test]
     fn test_invalid_duplicate_param_names() {
         let input = "fn foo(x: Int, x: Int) {}";
@@ -185,7 +186,7 @@ mod analyzer_tests {
     #[test]
     fn test_analyzer_array_access_function_param() {
         let input =
-            "fn get_element(arr: [Int], index: Int) -> Int { return arr[index]; } fn main() {}";
+            "fn getElement(arr: [Int], index: Int) -> Int { return arr[index]; } fn main() {}";
         assert!(analyze_code(input).is_ok());
     }
 
@@ -521,7 +522,7 @@ mod analyzer_tests {
                 print(x);
             }
         "#;
-        assert!(analyze_code(input).is_err());
+        assert!(analyze_code(input).is_ok());
     }
 
     #[test]

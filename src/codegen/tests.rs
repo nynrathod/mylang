@@ -16,9 +16,13 @@ mod codegen_tests {
             Ok(mut ast) => {
                 let mut analyzer = SemanticAnalyzer::new(None);
                 if let crate::parser::ast::AstNode::Program(ref mut nodes) = ast {
-                    analyzer
-                        .analyze_program(nodes)
-                        .map_err(|e| format!("{:?}", e))?;
+                    match analyzer.analyze_program(nodes) {
+                        Ok(_) => {}
+                        Err(e) => {
+                            eprintln!("Analyzer errors: {:?}", analyzer.collected_errors);
+                            return Err(format!("Analyzer error: {:?}", e));
+                        }
+                    }
 
                     let mut mir_builder = MirBuilder::new();
                     mir_builder.build_program(nodes);
@@ -285,22 +289,25 @@ mod codegen_tests {
                     let boolbb = 1 < 2 && 3 >= 2;
                     let mut counter = 0;
                     for i in 0..10 {
-                        let should_count = i > 5 && i < 9;
-                        if should_count {
+                        let shouldCount = i > 5 && i < 9;
+                        if shouldCount {
                             counter += 1;
                         }
                     }
                     let mut sum = 0;
                     for i in 0..5 {
-                        let is_even = i == 0 || i == 2 || i == 4;
-                        if is_even {
+                        let isEven = i % 2 == 0;
+                        if isEven {
                             sum += i;
                         }
                     }
                 }
             "#;
         let result = compile_code(input);
-        assert!(result.is_ok());
+        if let Err(ref e) = result {
+            eprintln!("Compilation failed: {}", e);
+        }
+        assert!(result.is_ok(), "Compilation failed: {:?}", result);
         let ir = result.unwrap();
         assert!(ir.contains("define"));
         assert!(ir.contains("main"));
@@ -331,7 +338,10 @@ mod codegen_tests {
                     }
                 "#;
         let result = compile_code(input);
-        assert!(result.is_ok());
+        if let Err(ref e) = result {
+            eprintln!("Compilation failed: {}", e);
+        }
+        assert!(result.is_ok(), "Compilation failed: {:?}", result);
     }
 
     #[test]
