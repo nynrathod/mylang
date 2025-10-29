@@ -137,11 +137,16 @@ impl<'a> Parser<'a> {
                                     });
                                 } else {
                                     return Err(ParseError::UnexpectedToken(
-                                        "Only single-variable assignment is allowed without 'let'".into(),
+                                        "Only single-variable assignment is allowed without 'let'"
+                                            .into(),
                                     ));
                                 }
                             }
-                            TokenType::PlusEq | TokenType::MinusEq | TokenType::StarEq | TokenType::SlashEq => {
+                            TokenType::PlusEq
+                            | TokenType::MinusEq
+                            | TokenType::StarEq
+                            | TokenType::SlashEq
+                            | TokenType::PercentEq => {
                                 let op = tok.kind;
                                 self.advance(); // consume compound operator
                                 let value = self.parse_expression()?;
@@ -156,7 +161,8 @@ impl<'a> Parser<'a> {
                                     });
                                 } else {
                                     return Err(ParseError::UnexpectedToken(
-                                        "Only single-variable compound assignment is allowed".into(),
+                                        "Only single-variable compound assignment is allowed"
+                                            .into(),
                                     ));
                                 }
                             }
