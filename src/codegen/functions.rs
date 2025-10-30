@@ -1,8 +1,6 @@
 use crate::codegen::core::CodeGen;
 use crate::mir::mir::{CodegenBlock, MirBlock, MirFunction, MirInstr, MirProgram, MirTerminator};
-use inkwell::types::BasicMetadataTypeEnum;
-use inkwell::types::StructType;
-use inkwell::types::{BasicType, BasicTypeEnum};
+use inkwell::types::{BasicMetadataTypeEnum, BasicTypeEnum, StructType};
 use inkwell::values::{BasicValueEnum, FunctionValue};
 use inkwell::AddressSpace;
 use std::collections::HashMap;

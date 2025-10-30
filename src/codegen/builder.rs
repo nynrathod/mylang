@@ -1,17 +1,8 @@
 use crate::codegen::core::{CodeGen, Symbol};
 use crate::mir::MirInstr;
-use inkwell::types::BasicType;
-use inkwell::types::BasicTypeEnum;
-use inkwell::types::StructType;
-use inkwell::values::BasicMetadataValueEnum;
-use inkwell::values::BasicValue;
+use inkwell::types::{BasicType, BasicTypeEnum};
 use inkwell::values::BasicValueEnum;
-use inkwell::values::FunctionValue;
-use inkwell::values::PointerValue;
-use inkwell::AddressSpace;
 use inkwell::IntPredicate;
-
-use std::collections::HashMap;
 
 impl<'ctx> CodeGen<'ctx> {
     /// Generates LLVM IR for a single Intermediate Representation (MIR) instruction.

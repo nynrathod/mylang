@@ -1,8 +1,5 @@
 use crate::codegen::core::{CodeGen, Symbol};
 use inkwell::types::BasicType;
-use inkwell::values::BasicValueEnum;
-use inkwell::AddressSpace;
-
 impl<'ctx> CodeGen<'ctx> {
     pub fn generate_load_array_element(
         &mut self,

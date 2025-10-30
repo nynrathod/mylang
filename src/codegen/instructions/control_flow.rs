@@ -1,7 +1,5 @@
 use crate::codegen::core::CodeGen;
 use crate::mir::MirInstr;
-use inkwell::values::BasicValueEnum;
-
 impl<'ctx> CodeGen<'ctx> {
     pub fn generate_call(
         &mut self,

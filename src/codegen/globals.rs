@@ -1,9 +1,7 @@
 use crate::codegen::core::{CodeGen, Symbol};
 use crate::mir::mir::MirInstr;
-use inkwell::types::BasicTypeEnum;
-use inkwell::types::{AsTypeRef, BasicType};
-use inkwell::values::{AnyValue, AsValueRef, BasicValue, BasicValueEnum};
-use inkwell::AddressSpace;
+use inkwell::types::{AsTypeRef, BasicType, BasicTypeEnum};
+use inkwell::values::{AsValueRef, BasicValue, BasicValueEnum};
 
 /// This module provides functions for generating LLVM IR for global variables, constants, arrays, maps, and string operations.
 /// It handles the translation of MIR instructions into LLVM global definitions, including constant folding and compile-time string concatenation.

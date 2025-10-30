@@ -1,8 +1,8 @@
 use crate::mir::declarations::{build_function_decl, build_let_decl, build_nested_collection};
-
-use crate::mir::expresssions::build_expression;
-use crate::mir::statements::build_statement;
-use crate::mir::{MirBlock, MirFunction, MirInstr, MirProgram};
+use crate::mir::{
+    expresssions::build_expression, statements::build_statement, MirBlock, MirFunction, MirInstr,
+    MirProgram,
+};
 use crate::parser::ast::{AstNode, Pattern};
 use std::collections::HashSet;
 use std::mem::discriminant;

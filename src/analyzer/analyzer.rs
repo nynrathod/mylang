@@ -2,7 +2,7 @@ use crate::analyzer::types::{NamedError, SemanticError};
 use crate::parser::ast::{AstNode, Pattern, TypeNode};
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 #[derive(Clone, Debug)]
 pub struct SymbolInfo {

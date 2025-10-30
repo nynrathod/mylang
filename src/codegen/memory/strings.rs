@@ -1,5 +1,5 @@
 use crate::codegen::core::CodeGen;
-use inkwell::values::{BasicValueEnum, FunctionValue};
+use inkwell::values::FunctionValue;
 use inkwell::AddressSpace;
 
 impl<'ctx> CodeGen<'ctx> {

@@ -1,8 +1,7 @@
 use crate::codegen::core::{ArrayMetadata, CodeGen};
 use inkwell::types::BasicType;
-use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
+use inkwell::values::BasicValueEnum;
 use inkwell::AddressSpace;
-use std::collections::HashMap;
 
 impl<'ctx> CodeGen<'ctx> {
     pub fn generate_array_with_metadata(
