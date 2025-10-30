@@ -149,8 +149,12 @@ impl<'ctx> CodeGen<'ctx> {
 
                     if value_is_heap_str {
                         self.heap_strings.insert(name.clone());
-                        // Remove temp from tracking (ownership transferred to symbol)
-                        self.heap_strings.remove(value);
+                        // Only remove temp from tracking if source is NOT a user variable
+                        // User variables (in symbols) should stay tracked for cleanup at function exit
+                        // Only remove if source is a compiler temporary (starts with %)
+                        if !self.symbols.contains_key(value) || value.starts_with('%') {
+                            self.heap_strings.remove(value);
+                        }
                         // Mark the temp as loop-local too (defensive - should already be marked by ArrayGet)
                         if is_from_arrayget {
                             self.loop_local_vars.insert(value.to_string());
@@ -161,8 +165,12 @@ impl<'ctx> CodeGen<'ctx> {
                         }
                     } else if value_is_heap_array {
                         self.heap_arrays.insert(name.clone());
-                        // Remove temp from tracking (ownership transferred to symbol)
-                        self.heap_arrays.remove(value);
+                        // Only remove temp from tracking if source is NOT a user variable
+                        // User variables (in symbols) should stay tracked for cleanup at function exit
+                        // Only remove if source is a compiler temporary (starts with %)
+                        if !self.symbols.contains_key(value) || value.starts_with('%') {
+                            self.heap_arrays.remove(value);
+                        }
                         // Only incref when copying from an existing variable (not from a temp)
                         if self.symbols.contains_key(value) {
                             self.emit_incref(name);
@@ -413,8 +421,13 @@ impl<'ctx> CodeGen<'ctx> {
                         }
                     } else if value_is_heap_map {
                         self.heap_maps.insert(name.clone());
-                        // Remove temp from tracking (ownership transferred to symbol)
-                        self.heap_maps.remove(value);
+                        // Only remove temp from tracking if source is NOT a user variable
+                        // User variables (in symbols) should stay tracked for cleanup at function exit
+                        // Only remove if source is a compiler temporary (starts with %)
+                        if !self.symbols.contains_key(value) || value.starts_with('%') {
+                            self.heap_maps.remove(value);
+                        }
+                        // Only incref when copying from an existing variable (not from a temp)
                         if self.symbols.contains_key(value) {
                             self.emit_incref(name);
                         }
