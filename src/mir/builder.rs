@@ -121,7 +121,7 @@ impl MirBuilder {
     pub fn build_program(&mut self, nodes: &[AstNode]) {
         for node in nodes {
             match node {
-                /// Declarations
+                // Declarations
                 AstNode::LetDecl { .. } => {
                     let instrs = build_let_decl(self, node);
                     self.program.globals.extend(instrs);
@@ -157,7 +157,7 @@ impl MirBuilder {
                     });
                 }
 
-                /// Statements
+                // Statements
                 AstNode::StringLiteral(value) => {
                     let tmp = self.next_tmp();
                     self.program.globals.push(MirInstr::ConstString {
