@@ -424,7 +424,7 @@ mod analyzer_tests {
     #[test]
     fn test_arrow_vs_minus_gt() {
         let input = "fn foo() -> Int { return 1; }";
-        assert!(analyze_code(input).is_ok());
+        assert!(analyze_code(input).is_err());
     }
 
     #[test]

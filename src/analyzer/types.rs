@@ -115,6 +115,10 @@ pub enum SemanticError {
 
     // --- Module Import Errors ---
     ModuleNotFound(String),
+    /// Dedicated error for circular imports, includes the cycle of modules
+    CircularImport {
+        cycle: Vec<String>,
+    },
     ParseError,
 
     ParseErrorInModule {
@@ -218,6 +222,7 @@ impl SemanticError {
             SemanticError::ParseError => "E0702",
 
             SemanticError::ParseErrorInModule { .. } => "E0703",
+            SemanticError::CircularImport { .. } => "E0704",
         }
     }
 }
@@ -226,6 +231,14 @@ impl fmt::Display for SemanticError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use SemanticError as E;
         match self {
+            E::CircularImport { cycle } => {
+                write!(
+                    f,
+                    "error[{}]: circular import detected: {}",
+                    self.code(),
+                    cycle.join(" -> ")
+                )
+            }
             // Variable Declaration/Assignment Errors
             E::VariableRedeclaration(n) => write!(
                 f,

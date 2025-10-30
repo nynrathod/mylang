@@ -27,6 +27,7 @@ pub struct SemanticAnalyzer {
     pub function_depth: usize,            // Track function nesting for return statement validation
     pub scope_sizes_stack: Vec<usize>,    // Track symbol table size at each scope level
     pub collected_errors: Vec<SemanticError>, // Collect all errors for reporting
+    pub is_main_module: bool,             // Track if analyzing main program or imported module
 }
 
 impl SemanticAnalyzer {
@@ -64,6 +65,7 @@ impl SemanticAnalyzer {
             function_depth: 0,
             scope_sizes_stack: Vec::new(),
             collected_errors: Vec::new(), // Initialize error collection
+            is_main_module: true,         // Main file by default
         }
     }
 
@@ -73,6 +75,17 @@ impl SemanticAnalyzer {
     /// 1. First pass: Process imports and register all function signatures (for forward references)
     /// 2. Second pass: Analyze function bodies and other statements
     pub fn analyze_program(&mut self, nodes: &mut Vec<AstNode>) -> Result<(), SemanticError> {
+        let mut import_stack = Vec::new();
+        self.analyze_program_with_stack(nodes, &mut import_stack)
+    }
+
+    /// Internal method that performs semantic analysis with an import stack for circular import detection.
+    /// This method is used recursively to ensure the import stack is maintained across all import chains.
+    fn analyze_program_with_stack(
+        &mut self,
+        nodes: &mut Vec<AstNode>,
+        import_stack: &mut Vec<String>,
+    ) -> Result<(), SemanticError> {
         // FIRST PASS: Process imports and register all function signatures
         // Collect errors but don't stop at first module error
 
@@ -80,7 +93,7 @@ impl SemanticAnalyzer {
             match node {
                 // Process imports first to load external functions
                 AstNode::Import { path, symbol } => {
-                    if let Err(e) = self.import_module(path, symbol) {
+                    if let Err(e) = self.import_module(path, symbol, import_stack) {
                         // Collect error but don't return immediately - continue processing
                         self.collected_errors.push(e);
                     }
@@ -129,10 +142,29 @@ impl SemanticAnalyzer {
             }
         }
 
-        // Return first error if any were collected, or Ok if no errors
-        if let Some(first_error) = self.collected_errors.first() {
-            // For now, just return a generic parse error since SemanticError doesn't implement Clone
-            Err(SemanticError::ParseError)
+        // Check that main() function exists only for the main module
+        if self.is_main_module && !self.function_table.contains_key("main") {
+            self.collected_errors.push(SemanticError::ParseError);
+        }
+
+        // If any errors were collected, prioritize reporting a circular import error
+        if !self.collected_errors.is_empty() {
+            // Prefer to report a circular import error if present
+            if let Some(circular) = self
+                .collected_errors
+                .iter()
+                .find(|e| matches!(e, SemanticError::CircularImport { .. }))
+            {
+                return Err(SemanticError::CircularImport {
+                    cycle: if let SemanticError::CircularImport { cycle } = circular {
+                        cycle.clone()
+                    } else {
+                        vec![]
+                    },
+                });
+            }
+            // Otherwise, report the first error as before
+            return Err(self.collected_errors.remove(0));
         } else {
             Ok(())
         }
@@ -315,14 +347,37 @@ impl SemanticAnalyzer {
         &mut self,
         path: &[String],
         symbol: &Option<String>,
+        import_stack: &mut Vec<String>,
     ) -> Result<(), SemanticError> {
         // Create module key for circular import detection
 
         let module_key = path.join("::");
 
+        if cfg!(debug_assertions) {
+            println!(
+                "[DEBUG] Importing module: {} (import stack: {:?})",
+                module_key, import_stack
+            );
+        }
+
+        // CIRCULAR DEPENDENCY DETECTION
+        if import_stack.contains(&module_key) {
+            let mut cycle = import_stack.clone();
+            cycle.push(module_key.clone());
+            if cfg!(debug_assertions) {
+                println!("[ERROR] Circular import detected: {}", cycle.join(" -> "));
+            }
+            return Err(SemanticError::CircularImport { cycle });
+        }
+        import_stack.push(module_key.clone());
+        if cfg!(debug_assertions) {
+            println!("[DEBUG] Import stack updated: {:?}", import_stack);
+        }
+
         // If importing a specific symbol, check if that symbol is already imported
         if let Some(sym) = symbol {
             if self.function_table.contains_key(sym) {
+                import_stack.pop();
                 return Ok(()); // Symbol already imported, skip
             }
         }
@@ -336,6 +391,7 @@ impl SemanticAnalyzer {
             } else {
                 path.join("::")
             };
+            import_stack.pop();
             SemanticError::ModuleNotFound(full_path)
         })?;
 
@@ -363,16 +419,21 @@ impl SemanticAnalyzer {
                 // Create a temporary analyzer and analyze (will be fast since already done)
                 let mut imported_analyzer = SemanticAnalyzer::new(Some(self.project_root.clone()));
                 let mut nodes_mut = nodes.clone();
-                imported_analyzer.analyze_program(&mut nodes_mut)?;
+                imported_analyzer.is_main_module = false;
+                imported_analyzer.analyze_program_with_stack(&mut nodes_mut, import_stack)?;
+                import_stack.pop();
                 (nodes, imported_analyzer)
             } else {
+                import_stack.pop();
                 return Ok(());
             }
         } else {
             // First time analyzing this module
 
-            let code = fs::read_to_string(&file_path)
-                .map_err(|_| SemanticError::ModuleNotFound(file_path.display().to_string()))?;
+            let code = fs::read_to_string(&file_path).map_err(|_| {
+                import_stack.pop();
+                SemanticError::ModuleNotFound(file_path.display().to_string())
+            })?;
 
             // Mark this module as being imported
 
@@ -382,12 +443,13 @@ impl SemanticAnalyzer {
 
             let mut parser = crate::parser::Parser::new(&tokens);
 
-            let ast = parser
-                .parse_program()
-                .map_err(|e| SemanticError::ParseErrorInModule {
+            let ast = parser.parse_program().map_err(|e| {
+                import_stack.pop();
+                SemanticError::ParseErrorInModule {
                     file: file_path.display().to_string(),
                     error: e.to_string(),
-                })?;
+                }
+            })?;
 
             // Recursively analyze the imported AST
             if let crate::parser::ast::AstNode::Program(mut nodes) = ast {
@@ -395,65 +457,77 @@ impl SemanticAnalyzer {
 
                 let mut imported_analyzer = SemanticAnalyzer::new(Some(self.project_root.clone()));
 
-                // Use analyze_program for proper two-pass analysis
+                // Use analyze_program_with_stack for proper two-pass analysis with circular import detection
+                // Pass the current import_stack so recursive imports are detected correctly
 
-                imported_analyzer.analyze_program(&mut nodes)?;
+                imported_analyzer.is_main_module = false;
+                imported_analyzer.analyze_program_with_stack(&mut nodes, import_stack)?;
 
+                import_stack.pop();
                 (nodes, imported_analyzer)
             } else {
                 println!(
                     "[WARNING] [import_module] Parsed AST from {:?} is not a Program variant",
                     file_path
                 );
+                import_stack.pop();
                 return Ok(());
             }
         };
 
         // Merge public functions from imported module into current function table
         // AND store the function AST nodes for MIR generation
+        // IMPORTANT: ALWAYS import ALL public functions from the module, regardless of specific symbol
+        // This is because functions may depend on each other within the same module.
+        // For example, if we import ConvertWithLogic, we also need BoolToInt which it calls.
+
         for node in nodes {
             if let AstNode::FunctionDecl { name, .. } = &node {
                 // Only import functions that start with uppercase (public convention)
                 if name.chars().next().unwrap_or('a').is_uppercase() {
-                    // If a specific symbol was requested, only import that symbol
-                    if let Some(sym) = symbol {
-                        if name == sym {
-                            // Store AST node for MIR generation (only if not already stored)
-                            if !self.imported_functions.iter().any(|n| {
-                                if let AstNode::FunctionDecl { name: fn_name, .. } = n {
-                                    fn_name == name
-                                } else {
-                                    false
-                                }
-                            }) {
-                                self.imported_functions.push(node.clone());
-                            }
-                            // Copy function signature to current function table
-                            if let Some((params, ret)) = imported_analyzer.function_table.get(name)
-                            {
-                                self.function_table
-                                    .insert(name.clone(), (params.clone(), ret.clone()));
-                            } else {
-                                println!("[WARNING] [import_module] Function '{}' not found in imported_analyzer.function_table", name);
-                            }
-                        }
-                    } else {
-                        // No specific symbol - import all public functions
-                        if !self.imported_functions.iter().any(|n| {
-                            if let AstNode::FunctionDecl { name: fn_name, .. } = n {
-                                fn_name == name
-                            } else {
-                                false
-                            }
-                        }) {
-                            self.imported_functions.push(node.clone());
-                        }
-                        if let Some((params, ret)) = imported_analyzer.function_table.get(name) {
-                            self.function_table
-                                .insert(name.clone(), (params.clone(), ret.clone()));
+                    // Always import all public functions from this module
+                    // This ensures internal module dependencies are available
+                    if !self.imported_functions.iter().any(|n| {
+                        if let AstNode::FunctionDecl { name: fn_name, .. } = n {
+                            fn_name == name
                         } else {
-                            println!("[WARNING] [import_module] Function '{}' not found in imported_analyzer.function_table", name);
+                            false
                         }
+                    }) {
+                        self.imported_functions.push(node.clone());
+                    }
+                    // Copy function signature to current function table
+                    if let Some((params, ret)) = imported_analyzer.function_table.get(name) {
+                        self.function_table
+                            .insert(name.clone(), (params.clone(), ret.clone()));
+                    }
+                }
+            }
+        }
+
+        // TRANSITIVE IMPORTS: Import all transitive dependencies from the imported module
+        // This ensures that if module A imports from module B, and B imports from C,
+        // then A gets C's functions too (just like Rust and Go handle transitive imports)
+        for transitive_node in &imported_analyzer.imported_functions {
+            if let AstNode::FunctionDecl {
+                name: trans_name, ..
+            } = transitive_node
+            {
+                // Add to imported_functions if not already present
+                if !self.imported_functions.iter().any(|n| {
+                    if let AstNode::FunctionDecl { name: fn_name, .. } = n {
+                        fn_name == trans_name
+                    } else {
+                        false
+                    }
+                }) {
+                    self.imported_functions.push(transitive_node.clone());
+                }
+                // Add to function_table if not already present
+                if !self.function_table.contains_key(trans_name) {
+                    if let Some((params, ret)) = imported_analyzer.function_table.get(trans_name) {
+                        self.function_table
+                            .insert(trans_name.clone(), (params.clone(), ret.clone()));
                     }
                 }
             }
