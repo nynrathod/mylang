@@ -65,6 +65,7 @@ impl<'ctx> CodeGen<'ctx> {
 
     /// Creates the LLVM function for decrementing the reference count (decref).
     /// If the reference count reaches zero, memory is freed.
+    /// Includes safety checks to prevent dereferencing invalid pointers (e.g., global constants).
     /// Returns the LLVM FunctionValue for later use.
     fn create_decref_function(&self) -> FunctionValue<'ctx> {
         // Define the function signature: void(i8*)
@@ -75,6 +76,7 @@ impl<'ctx> CodeGen<'ctx> {
         // Add the function to the module
         let function = self.module.add_function("__decref", fn_type, None);
         let entry = self.context.append_basic_block(function, "entry");
+        let check_validity = self.context.append_basic_block(function, "check_validity");
         let free_block = self.context.append_basic_block(function, "free");
         let exit_block = self.context.append_basic_block(function, "exit");
 
@@ -83,6 +85,17 @@ impl<'ctx> CodeGen<'ctx> {
 
         // Get the RC header pointer from the function parameter
         let rc_ptr = function.get_nth_param(0).unwrap().into_pointer_value();
+
+        // SAFETY CHECK: Verify RC header pointer is not null
+        // (null pointers indicate invalid/global data)
+        let is_null = self.builder.build_is_null(rc_ptr, "is_null").unwrap();
+
+        self.builder
+            .build_conditional_branch(is_null, exit_block, check_validity)
+            .unwrap();
+
+        // Check validity block: validate RC count is reasonable
+        self.builder.position_at_end(check_validity);
 
         // Cast the RC header pointer to i32* (reference count is stored as i32)
         let i32_ptr_type = self.context.i32_type().ptr_type(AddressSpace::default());
@@ -97,6 +110,42 @@ impl<'ctx> CodeGen<'ctx> {
             .build_load(self.context.i32_type(), rc_ptr_typed, "rc")
             .unwrap()
             .into_int_value();
+
+        // SAFETY CHECK: RC count should be positive and less than a reasonable max
+        // (e.g., 1-1000000). If not, this is likely a global constant pointer, skip it.
+        let is_positive = self
+            .builder
+            .build_int_compare(
+                inkwell::IntPredicate::SGT,
+                rc,
+                self.context.i32_type().const_int(0, false),
+                "is_positive",
+            )
+            .unwrap();
+
+        let is_reasonable = self
+            .builder
+            .build_int_compare(
+                inkwell::IntPredicate::SLT,
+                rc,
+                self.context.i32_type().const_int(1000000, false),
+                "is_reasonable",
+            )
+            .unwrap();
+
+        let is_valid_rc = self
+            .builder
+            .build_and(is_positive, is_reasonable, "is_valid_rc")
+            .unwrap();
+
+        // Branch to decrement logic only if RC is valid
+        let do_decrement = self.context.append_basic_block(function, "do_decrement");
+        self.builder
+            .build_conditional_branch(is_valid_rc, do_decrement, exit_block)
+            .unwrap();
+
+        // Do decrement block
+        self.builder.position_at_end(do_decrement);
 
         // Decrement the reference count by 1
         let new_rc = self
