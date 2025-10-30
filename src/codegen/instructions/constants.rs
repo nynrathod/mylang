@@ -39,67 +39,19 @@ impl<'ctx> CodeGen<'ctx> {
         name: &str,
         value: &str,
     ) -> Option<BasicValueEnum<'ctx>> {
-        let malloc_fn = self.get_or_declare_malloc();
-        let total_size = 8 + value.len() + 1;
-        let size_val = self.context.i64_type().const_int(total_size as u64, false);
-
-        let heap_ptr = self
-            .builder
-            .build_call(malloc_fn, &[size_val.into()], "heap_str")
-            .unwrap()
-            .try_as_basic_value()
-            .left()
-            .unwrap()
-            .into_pointer_value();
-
-        let rc_ptr = self
-            .builder
-            .build_pointer_cast(
-                heap_ptr,
-                self.context.ptr_type(inkwell::AddressSpace::default()),
-                "rc_ptr",
-            )
-            .unwrap();
-        self.builder
-            .build_store(rc_ptr, self.context.i32_type().const_int(1, false))
-            .unwrap();
-
-        let data_ptr = unsafe {
-            self.builder
-                .build_gep(
-                    self.context.i8_type(),
-                    heap_ptr,
-                    &[self.context.i32_type().const_int(8, false)],
-                    "data_ptr",
-                )
-                .unwrap()
-        };
+        // String constants should be module-level static constants, not heap allocations.
+        // This avoids memory leaks and unnecessary malloc/free overhead.
+        // The string data is stored in the read-only data section of the binary.
 
         let str_global = self
             .builder
-            .build_global_string_ptr(value, "str_const")
-            .expect("Failed to create string");
+            .build_global_string_ptr(value, &format!("str_const_{}", name))
+            .expect("Failed to create string constant");
 
-        let memcpy = self.get_or_declare_memcpy();
-        let len = self
-            .context
-            .i64_type()
-            .const_int((value.len() + 1) as u64, false);
-        self.builder
-            .build_call(
-                memcpy,
-                &[
-                    data_ptr.into(),
-                    str_global.as_pointer_value().into(),
-                    len.into(),
-                    self.context.bool_type().const_zero().into(),
-                ],
-                "",
-            )
-            .unwrap();
+        let data_ptr = str_global.as_pointer_value();
 
+        // Store in temp_values so it can be resolved by name
         self.temp_values.insert(name.to_string(), data_ptr.into());
-        self.heap_strings.insert(name.to_string());
 
         Some(data_ptr.into())
     }
