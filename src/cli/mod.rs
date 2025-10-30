@@ -16,6 +16,10 @@ pub struct Cli {
 pub enum Commands {
     /// Build the project to a persistent binary
     Build {
+        /// Path to the project directory or .doo file
+        #[arg(default_value = ".")]
+        path: PathBuf,
+
         /// Name of the output binary
         #[arg(short, long, default_value = "output")]
         output: String,
@@ -60,9 +64,13 @@ pub fn run_cli(cli: Cli) -> i32 {
             println!("Type `doo --help` for usage");
             0
         }
-        Some(Commands::Build { output, keep_ll }) => {
+        Some(Commands::Build {
+            path,
+            output,
+            keep_ll,
+        }) => {
             let opts = CompileOptions {
-                input_path: PathBuf::from("."),
+                input_path: path.clone(),
                 output_name: output.clone(),
                 dev_mode: false,
                 print_ast: false,
@@ -78,7 +86,7 @@ pub fn run_cli(cli: Cli) -> i32 {
                         eprintln!("Build failed with {} errors", result.error_count);
                         return 1;
                     } else if result.success {
-                        println!("✓ Build successful");
+                        println!("✓ Build successful: {}", output);
                         return 0;
                     } else {
                         eprintln!("Build failed");
