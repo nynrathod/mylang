@@ -34,6 +34,7 @@ impl MirBuilder {
             program: MirProgram {
                 functions: vec![],
                 globals: vec![],
+                is_main_entry: true, // Default to true; can be set to false for imported modules
             },
             tmp_counter: 1,
             block_counter: 0,
@@ -45,6 +46,10 @@ impl MirBuilder {
 
     /// Generate a unique temporary variable name for MIR instructions.
     /// Used for intermediate results and SSA-style variables.
+    pub fn set_is_main_entry(&mut self, is_main: bool) {
+        self.program.is_main_entry = is_main;
+    }
+
     pub fn next_tmp(&mut self) -> String {
         let tmp = format!("%{}", self.tmp_counter);
         self.tmp_counter += 1;

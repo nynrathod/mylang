@@ -9,6 +9,7 @@ use crate::parser::ast::{AstNode, Pattern, TypeNode};
 pub struct MirProgram {
     pub functions: Vec<MirFunction>, // All function definitions
     pub globals: Vec<MirInstr>,      // Global variable initializations
+    pub is_main_entry: bool,         // Whether this is the main entry point file (requires main())
 }
 
 /// A single function in MIR form

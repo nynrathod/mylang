@@ -3,7 +3,7 @@ use crate::mir::mir::{CodegenBlock, MirBlock, MirFunction, MirInstr, MirProgram,
 use inkwell::types::BasicMetadataTypeEnum;
 use inkwell::types::StructType;
 use inkwell::types::{BasicType, BasicTypeEnum};
-use inkwell::values::FunctionValue;
+use inkwell::values::{BasicValueEnum, FunctionValue};
 use inkwell::AddressSpace;
 use std::collections::HashMap;
 
@@ -50,8 +50,8 @@ impl<'ctx> CodeGen<'ctx> {
         }
 
         // --- MAIN ENTRY POINT ---
-        // Ensures the final executable has a standard `main` function if the source didn't define one.
-        if self.module.get_function("main").is_none() {
+        // For non-main-entry files (imported modules), generate a default main if needed
+        if !program.is_main_entry && self.module.get_function("main").is_none() {
             self.generate_default_main();
         }
     }
@@ -121,8 +121,14 @@ impl<'ctx> CodeGen<'ctx> {
         self.builder.position_at_end(entry_bb);
 
         // Execute any runtime instructions from global scope (like Print, BinaryOp for runtime values)
+        // NOTE: Skip ConstString instructions - they are already processed in generate_global
+        // and stored as static constants. Processing them here would cause duplicate heap allocations.
         for instr in &self.globals.clone() {
             match instr {
+                MirInstr::ConstString { .. } => {
+                    // Skip - these are already defined as module-level constants in generate_global
+                    // Reprocessing would cause memory leaks from duplicate malloc calls
+                }
                 MirInstr::Print { .. } => {
                     self.generate_instr(instr);
                 }
@@ -135,6 +141,9 @@ impl<'ctx> CodeGen<'ctx> {
                 }
             }
         }
+
+        // Perform cleanup before returning from main
+        self.generate_function_exit_cleanup();
 
         let zero = self.context.i32_type().const_int(0, false);
         // Generates the `ret i32 0` instruction.
@@ -482,6 +491,11 @@ impl<'ctx> CodeGen<'ctx> {
         // Allocate stack space for cross-block variables with correct types
         for var in &cross_block_vars {
             if !self.symbols.contains_key(var) {
+                // Skip function parameters - they are already initialized from incoming values
+                if func.params.contains(var) {
+                    continue;
+                }
+
                 // Determine the correct type for this variable
                 let var_type = var_types.get(var).copied().unwrap_or_else(|| {
                     // Index and end variables are always i32
@@ -509,6 +523,22 @@ impl<'ctx> CodeGen<'ctx> {
                     .build_alloca(var_type, var)
                     .expect("Failed to allocate cross-block variable");
 
+                // ALWAYS initialize loop variables immediately to prevent uninitialized value errors
+                // Loop index variables (__index, _end) must start at 0
+                // Other variables use appropriate defaults (0 for int, null for ptr)
+                let default_val: BasicValueEnum = if var_type.is_pointer_type() {
+                    self.context
+                        .ptr_type(AddressSpace::default())
+                        .const_null()
+                        .into()
+                } else if var_type.is_int_type() {
+                    self.context.i32_type().const_int(0, false).into()
+                } else {
+                    self.context.i32_type().const_int(0, false).into()
+                };
+
+                self.builder.build_store(alloca, default_val).unwrap();
+
                 self.symbols.insert(
                     var.clone(),
                     crate::codegen::Symbol {
@@ -522,7 +552,6 @@ impl<'ctx> CodeGen<'ctx> {
         // After ALL allocations in entry block, jump to first MIR block
         if let Some(first_mir_block) = func.blocks.first() {
             if let Some(first_bb) = bb_map.get(&first_mir_block.label) {
-                // Build unconditional branch from entry block to first MIR block
                 self.builder.build_unconditional_branch(*first_bb).unwrap();
             }
         }
@@ -683,7 +712,47 @@ impl<'ctx> CodeGen<'ctx> {
             self.emit_decref(&var_name);
         }
 
-        // NOTE: temp_values are NOT cleaned here.
+        // Cleanup temporary heap strings (intermediate concat results, etc.)
+        // These are heap-allocated strings that are NOT in symbols (no alloca)
+        // but ARE tracked in heap_strings (e.g., intermediate concat results)
+        let mut temp_heap_strs: Vec<String> = self
+            .heap_strings
+            .iter()
+            .filter(|name| {
+                // Only temps (not in symbols, not loop-local vars)
+                !self.symbols.contains_key(*name)
+                    && !self.loop_local_vars.contains(*name)
+                    && !is_compiler_temp(name)
+                    && self.temp_values.contains_key(*name)
+            })
+            .cloned()
+            .collect();
+        temp_heap_strs.reverse();
+
+        for temp_name in temp_heap_strs {
+            // For temps, we need to get the pointer from temp_values and decref
+            if let Some(val) = self.temp_values.get(&temp_name) {
+                if val.is_pointer_value() {
+                    let data_ptr = val.into_pointer_value();
+                    let rc_header = unsafe {
+                        self.builder.build_in_bounds_gep(
+                            self.context.i8_type(),
+                            data_ptr,
+                            &[self.context.i32_type().const_int((-8_i32) as u64, true)],
+                            "rc_header",
+                        )
+                    }
+                    .unwrap();
+
+                    let decref = self.decref_fn.unwrap();
+                    self.builder
+                        .build_call(decref, &[rc_header.into()], "")
+                        .unwrap();
+                }
+            }
+        }
+
+        // NOTE: Other temp_values (non-heap) are NOT cleaned here.
         // temp_values contains temporary SSA values (GEP results, block-local pointers).
         // These either:
         //  1. Are already covered by symbols (if they were stored), OR
@@ -1033,6 +1102,46 @@ impl<'ctx> CodeGen<'ctx> {
                     self.emit_decref(&var_name);
                 }
 
+                // 5. Free temporary heap strings (intermediate concat results, etc.)
+                // These are heap-allocated strings that are NOT in symbols (no alloca)
+                // but ARE tracked in heap_strings (e.g., intermediate concat results)
+                let mut temp_heap_strs: Vec<String> = self
+                    .heap_strings
+                    .iter()
+                    .filter(|name| {
+                        // Only temps (not in symbols), and not the return value
+                        !self.symbols.contains_key(*name)
+                            && !self.loop_local_vars.contains(*name)
+                            && return_value_name.map_or(true, |ret| ret != *name)
+                            && self.temp_values.contains_key(*name)
+                    })
+                    .cloned()
+                    .collect();
+                temp_heap_strs.reverse();
+
+                for temp_name in temp_heap_strs {
+                    // For temps, we need to get the pointer from temp_values and decref
+                    if let Some(val) = self.temp_values.get(&temp_name) {
+                        if val.is_pointer_value() {
+                            let data_ptr = val.into_pointer_value();
+                            let rc_header = unsafe {
+                                self.builder.build_in_bounds_gep(
+                                    self.context.i8_type(),
+                                    data_ptr,
+                                    &[self.context.i32_type().const_int((-8_i32) as u64, true)],
+                                    "rc_header",
+                                )
+                            }
+                            .unwrap();
+
+                            let decref = self.decref_fn.unwrap();
+                            self.builder
+                                .build_call(decref, &[rc_header.into()], "")
+                                .unwrap();
+                        }
+                    }
+                }
+
                 if values.is_empty() {
                     // Check if this is the main function - it must return i32 0
                     let fn_name = func.get_name().to_str().unwrap();
@@ -1045,6 +1154,16 @@ impl<'ctx> CodeGen<'ctx> {
                     }
                 } else {
                     let return_value_name = &values[0];
+
+                    // Track if this function returns a heap-allocated value
+                    let fn_name = func.get_name().to_str().unwrap();
+                    let is_heap_return = self.heap_strings.contains(return_value_name)
+                        || self.heap_arrays.contains(return_value_name)
+                        || self.heap_maps.contains(return_value_name);
+
+                    if is_heap_return {
+                        self.functions_returning_heap.insert(fn_name.to_string());
+                    }
 
                     // Check if we're returning a function parameter that needs RC increment
                     let needs_incref =
@@ -1065,7 +1184,13 @@ impl<'ctx> CodeGen<'ctx> {
 
                     let val = self.resolve_value(return_value_name);
 
-                    // If returning an RC-typed parameter, incref it (caller expects ownership)
+                    // If returning an RC-typed parameter, mark function as returning heap
+                    // and incref it (caller expects ownership)
+                    if needs_incref {
+                        let fn_name = func.get_name().to_str().unwrap();
+                        self.functions_returning_heap.insert(fn_name.to_string());
+                    }
+
                     if needs_incref && val.is_pointer_value() {
                         let ptr = val.into_pointer_value();
                         let rc_header = unsafe {

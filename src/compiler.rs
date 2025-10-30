@@ -262,8 +262,19 @@ pub fn compile_project(opts: CompileOptions) -> Result<CompileResult, String> {
     if opts.print_ast {}
 
     let mut mir_builder = MirBuilder::new();
+    mir_builder.set_is_main_entry(true); // Mark this as the main entry point
     mir_builder.build_program(&all_nodes);
     mir_builder.finalize();
+
+    // Check that main() function exists before code generation
+    let has_main = mir_builder
+        .program
+        .functions
+        .iter()
+        .any(|f| f.name == "main");
+    if !has_main {
+        return Err("Error: main() function not found. Every program must have a main() function as the entry point.".to_string());
+    }
 
     if opts.print_mir || opts.dev_mode {}
 
