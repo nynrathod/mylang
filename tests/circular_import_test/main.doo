@@ -1,0 +1,8 @@
+// expect-fail: circular import
+import CircularA::FunctionA;
+
+fn main() {
+    print("Testing circular import detection...");
+    let result = FunctionA();
+    print("Result:", result);
+}

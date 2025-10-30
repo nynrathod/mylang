@@ -1,0 +1,5 @@
+import CircularA::FunctionA;
+
+fn FunctionB() -> Int {
+    return FunctionA() + 2;
+}

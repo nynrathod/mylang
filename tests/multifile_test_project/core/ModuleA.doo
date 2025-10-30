@@ -1,0 +1,7 @@
+fn ValueA() -> Int {
+    return 100;
+}
+
+fn OperationA(x: Int) -> Int {
+    return x + 10;
+}
