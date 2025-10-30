@@ -91,14 +91,23 @@ pub fn compile_project(opts: CompileOptions) -> Result<CompileResult, String> {
     let input_path = if opts.input_path.is_file() {
         opts.input_path.clone()
     } else {
+        // Try main.doo in the specified directory
         let main_file = opts.input_path.join("main.doo");
-        if !main_file.exists() {
-            return Err(format!(
-                "Error: main.doo not found in {}",
-                opts.input_path.display()
-            ));
+        if main_file.exists() {
+            main_file
+        } else {
+            // Try src/main.doo if not found in root
+            let src_main_file = opts.input_path.join("src").join("main.doo");
+            if src_main_file.exists() {
+                src_main_file
+            } else {
+                return Err(format!(
+                    "Error: main.doo not found in {} or {}/src",
+                    opts.input_path.display(),
+                    opts.input_path.display()
+                ));
+            }
         }
-        main_file
     };
 
     let input = fs::read_to_string(&input_path)
