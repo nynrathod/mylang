@@ -29,14 +29,19 @@ impl<'ctx> CodeGen<'ctx> {
                 let dest_name = &dest[0];
                 self.temp_values.insert(dest_name.clone(), result);
 
-                if let Some(return_type_str) = self.function_return_types.get(func) {
+                // Check if this function is known to return heap-allocated values
+                if self.functions_returning_heap.contains(func) {
                     if result.is_pointer_value() {
-                        if return_type_str.contains("Str") || return_type_str.contains("String") {
-                            self.heap_strings.insert(dest_name.clone());
-                        } else if return_type_str.contains("Array") {
-                            self.heap_arrays.insert(dest_name.clone());
-                        } else if return_type_str.contains("Map") {
-                            self.heap_maps.insert(dest_name.clone());
+                        // Mark the result as heap-allocated based on return type
+                        if let Some(return_type_str) = self.function_return_types.get(func) {
+                            if return_type_str.contains("Str") || return_type_str.contains("String")
+                            {
+                                self.heap_strings.insert(dest_name.clone());
+                            } else if return_type_str.contains("Array") {
+                                self.heap_arrays.insert(dest_name.clone());
+                            } else if return_type_str.contains("Map") {
+                                self.heap_maps.insert(dest_name.clone());
+                            }
                         }
                     }
                 }
