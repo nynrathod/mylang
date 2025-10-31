@@ -142,7 +142,13 @@ pub fn run_cli(cli: Cli) -> i32 {
             } else {
                 temp_name.clone()
             };
-            let exe_path = std::env::current_dir().unwrap().join(&exe_name);
+            let exe_path = match std::env::current_dir() {
+                Ok(dir) => dir.join(&exe_name),
+                Err(_) => {
+                    eprintln!("Error: Could not determine current directory");
+                    return 1;
+                }
+            };
 
             // Run the temp binary and stream output directly to terminal
             use std::process::Stdio;

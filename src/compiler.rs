@@ -113,7 +113,10 @@ pub fn compile_project(opts: CompileOptions) -> Result<CompileResult, String> {
     let input = fs::read_to_string(&input_path)
         .map_err(|e| format!("Failed to read {}: {}", input_path.display(), e))?;
 
-    let project_root = input_path.parent().unwrap().to_path_buf();
+    let project_root = input_path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
     let tokens = lex(&input);
     let mut parser = Parser::new(&tokens);
@@ -152,7 +155,7 @@ pub fn compile_project(opts: CompileOptions) -> Result<CompileResult, String> {
     if let Err(e) = analyzer.analyze_program(&mut statements) {
         match &e {
             SemanticError::ParseErrorInModule { file, error } => {
-                let re = Regex::new(r"at (\d+):(\d+): (.+)").unwrap();
+                let re = Regex::new(r"at (\d+):(\d+): (.+)").expect("Regex pattern is valid");
                 let (line, col, msg) = if let Some(caps) = re.captures(error) {
                     (
                         caps.get(1).and_then(|m| m.as_str().parse().ok()),
@@ -197,7 +200,7 @@ pub fn compile_project(opts: CompileOptions) -> Result<CompileResult, String> {
                 file,
                 error: err_msg,
             } => {
-                let re = Regex::new(r"at (\d+):(\d+): (.+)").unwrap();
+                let re = Regex::new(r"at (\d+):(\d+): (.+)").expect("Regex pattern is valid");
                 let (line, col, msg) = if let Some(caps) = re.captures(err_msg) {
                     (
                         caps.get(1).and_then(|m| m.as_str().parse().ok()),
@@ -361,7 +364,10 @@ fn compile_to_native(
         .write_to_file(&codegen.module, FileType::Object, Path::new(&obj_file))
         .map_err(|e| format!("Failed to write object file: {}", e))?;
 
-    link_object_file(&obj_file, exe_path.to_str().unwrap(), opts.dev_mode)?;
+    let exe_path_str = exe_path
+        .to_str()
+        .ok_or_else(|| "Could not convert executable path to string".to_string())?;
+    link_object_file(&obj_file, exe_path_str, opts.dev_mode)?;
 
     // Always remove .o file after linking unless keep_obj is true
     if !opts.keep_obj {

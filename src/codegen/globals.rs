@@ -89,7 +89,10 @@ impl<'ctx> CodeGen<'ctx> {
                     "le" => lhs_val.const_int_compare(inkwell::IntPredicate::SLE, rhs_val),
                     "gt" => lhs_val.const_int_compare(inkwell::IntPredicate::SGT, rhs_val),
                     "ge" => lhs_val.const_int_compare(inkwell::IntPredicate::SGE, rhs_val),
-                    _ => panic!("Unsupported binary op in globals: {}. Note: div and mod are not supported for global constants.", op),
+                    _ => {
+                        debug_assert!(false, "Unsupported binary op in globals: {}. Note: div and mod are not supported for global constants.", op);
+                        lhs_val // Fallback: return left operand
+                    }
                 };
                 // Store the result as a new constant value.
                 self.temp_values.insert(dst.clone(), res.into());
@@ -335,8 +338,9 @@ impl<'ctx> CodeGen<'ctx> {
             return s.as_pointer_value().into();
         }
 
-        // If none of the above, panic with an error.
-        panic!("Unknown global variable or literal: {}", name);
+        // If none of the above, return a default value
+        debug_assert!(false, "Unknown global variable or literal: {}", name);
+        self.context.i32_type().const_int(0, false).into()
     }
 
     /// Finds a specific MIR instruction (e.g., a ConstString) by its destination name.

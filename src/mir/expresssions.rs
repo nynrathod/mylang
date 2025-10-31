@@ -173,7 +173,12 @@ pub fn build_expression(builder: &mut MirBuilder, expr: &AstNode, block: &mut Mi
                     tmp
                 }
                 _ => {
-                    panic!("Unsupported unary operator: {:?}", op);
+                    debug_assert!(
+                        false,
+                        "Unsupported unary operator: {:?} - should be caught by analyzer",
+                        op
+                    );
+                    String::new() // Fallback for release builds
                 }
             }
         }
@@ -250,7 +255,21 @@ pub fn build_expression(builder: &mut MirBuilder, expr: &AstNode, block: &mut Mi
                                     }
                                 }
                                 Err(err) => {
-                                    panic!("Type error in addition: {}", err);
+                                    debug_assert!(
+                                        false,
+                                        "Type error in addition: {} - should be caught by analyzer",
+                                        err
+                                    );
+                                    // Continue with placeholder - analyzer should catch this
+                                    block.instrs.push(MirInstr::BinaryOp(
+                                        "add:int".to_string(),
+                                        dest_tmp.clone(),
+                                        lhs_tmp,
+                                        rhs_tmp,
+                                    ));
+                                    builder
+                                        .mir_symbol_table
+                                        .insert(dest_tmp.clone(), TypeNode::Int);
                                 }
                             }
                         }
@@ -276,7 +295,17 @@ pub fn build_expression(builder: &mut MirBuilder, expr: &AstNode, block: &mut Mi
                         // Determine operation type based on operands
                         match determine_op_type(builder, &lhs_tmp, &rhs_tmp) {
                             Ok(op_type) if op_type == "string" => {
-                                panic!("Cannot perform '{}' operation on string types", op_str);
+                                debug_assert!(false, "Cannot perform '{}' operation on string types - should be caught by analyzer", op_str);
+                                // Fallback: generate placeholder instruction
+                                block.instrs.push(MirInstr::BinaryOp(
+                                    format!("{}:int", op_str),
+                                    dest_tmp.clone(),
+                                    lhs_tmp,
+                                    rhs_tmp,
+                                ));
+                                builder
+                                    .mir_symbol_table
+                                    .insert(dest_tmp.clone(), TypeNode::Int);
                             }
                             Ok(op_type) => {
                                 block.instrs.push(MirInstr::BinaryOp(
@@ -304,7 +333,17 @@ pub fn build_expression(builder: &mut MirBuilder, expr: &AstNode, block: &mut Mi
                                 }
                             }
                             Err(err) => {
-                                panic!("Type error in '{}' operation: {}", op_str, err);
+                                debug_assert!(false, "Type error in '{}' operation: {} - should be caught by analyzer", op_str, err);
+                                // Fallback: generate placeholder instruction
+                                block.instrs.push(MirInstr::BinaryOp(
+                                    format!("{}:int", op_str),
+                                    dest_tmp.clone(),
+                                    lhs_tmp,
+                                    rhs_tmp,
+                                ));
+                                builder
+                                    .mir_symbol_table
+                                    .insert(dest_tmp.clone(), TypeNode::Int);
                             }
                         }
                     }

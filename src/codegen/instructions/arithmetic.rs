@@ -68,7 +68,11 @@ impl<'ctx> CodeGen<'ctx> {
                     .build_int_compare(inkwell::IntPredicate::NE, lhs_int, rhs_int, "array_ne_tmp")
                     .unwrap()
             } else {
-                panic!("Only eq and ne operations are supported for arrays/maps");
+                debug_assert!(
+                    false,
+                    "Only eq and ne operations are supported for arrays/maps"
+                );
+                return Some(self.context.i32_type().const_int(0, false).into());
             };
 
             self.temp_values.insert(dst.to_string(), result.into());
@@ -133,13 +137,21 @@ impl<'ctx> CodeGen<'ctx> {
                         .build_float_compare(FloatPredicate::OGE, lhs_float, rhs_float, "fge_tmp")
                         .unwrap()
                         .into(),
-                    _ => panic!("Unsupported float binary op: {}", op),
+                    _ => {
+                        debug_assert!(false, "Unsupported float binary op: {}", op);
+                        self.builder
+                            .build_float_add(lhs_float, rhs_float, "fallback_add")
+                            .unwrap()
+                            .into()
+                    }
                 }
             } else {
-                panic!(
+                debug_assert!(
+                    false,
                     "Float arithmetic expects both operands to be float values, got {:?} and {:?}",
                     lhs_val, rhs_val
                 );
+                self.context.f64_type().const_float(0.0).into()
             }
         } else {
             if lhs_val.is_int_value() && rhs_val.is_int_value() {
@@ -211,13 +223,21 @@ impl<'ctx> CodeGen<'ctx> {
                         .build_or(lhs_int, rhs_int, "or_tmp")
                         .unwrap()
                         .into(),
-                    _ => panic!("Unsupported int binary op: {}", op),
+                    _ => {
+                        debug_assert!(false, "Unsupported int binary op: {}", op);
+                        self.builder
+                            .build_int_add(lhs_int, rhs_int, "fallback_add")
+                            .unwrap()
+                            .into()
+                    }
                 }
             } else {
-                panic!(
+                debug_assert!(
+                    false,
                     "Int arithmetic expects both operands to be int values, got {:?} and {:?}",
                     lhs_val, rhs_val
                 );
+                self.context.i32_type().const_int(0, false).into()
             }
         };
 

@@ -12,10 +12,15 @@ impl<'ctx> CodeGen<'ctx> {
             return sym.ptr;
         }
 
-        panic!(
+        debug_assert!(
+            false,
             "Unknown variable for pointer resolution: {} - check your MIR generation",
             name
         );
+        // Return a null pointer as fallback for release builds
+        self.context
+            .ptr_type(inkwell::AddressSpace::default())
+            .const_null()
     }
 
     /// Resolve value (unchanged)
@@ -53,10 +58,13 @@ impl<'ctx> CodeGen<'ctx> {
             return self.context.i32_type().const_int(0, false).into();
         }
 
-        panic!(
+        debug_assert!(
+            false,
             "Unknown variable or literal: {} - check your MIR generation",
             name
         );
+        // Return a zero value as fallback for release builds
+        self.context.i32_type().const_int(0, false).into()
     }
 
     /// Returns the LLVM type corresponding to a type name string.

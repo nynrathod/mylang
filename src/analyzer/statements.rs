@@ -289,9 +289,14 @@ impl SemanticAnalyzer {
             "break", "continue", "print", "true", "false",
         ];
         // Disallow empty, reserved, or starts with digit
-        if name.is_empty() || KEYWORDS.contains(&name) || name.chars().next().unwrap().is_digit(10)
-        {
+        if name.is_empty() || KEYWORDS.contains(&name) {
             return false;
+        }
+        // Check if first character is a digit (safe: we already checked !is_empty())
+        if let Some(first_char) = name.chars().next() {
+            if first_char.is_digit(10) {
+                return false;
+            }
         }
         true
     }

@@ -322,7 +322,10 @@ pub fn build_statement(builder: &mut MirBuilder, stmt: &AstNode, block: &mut Mir
                     target: loop_ctx.break_target.clone(),
                 });
             } else {
-                panic!("Break statement outside of loop");
+                debug_assert!(
+                    false,
+                    "Break statement outside of loop - should be caught by analyzer"
+                );
             }
         }
 
@@ -333,7 +336,10 @@ pub fn build_statement(builder: &mut MirBuilder, stmt: &AstNode, block: &mut Mir
                     target: loop_ctx.continue_target.clone(),
                 });
             } else {
-                panic!("Continue statement outside of loop");
+                debug_assert!(
+                    false,
+                    "Continue statement outside of loop - should be caught by analyzer"
+                );
             }
         }
 

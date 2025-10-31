@@ -48,7 +48,8 @@ impl SemanticAnalyzer {
 impl SemanticAnalyzer {
     /// Create a new semantic analyzer with empty symbol/function tables.
     pub fn new(project_root: Option<PathBuf>) -> Self {
-        let project_root = project_root.unwrap_or_else(|| std::env::current_dir().unwrap());
+        let project_root = project_root
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
         if cfg!(debug_assertions) {
             println!("[DEBUG] Project root set to: {:?}", project_root);
         }

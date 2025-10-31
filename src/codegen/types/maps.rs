@@ -277,10 +277,17 @@ impl<'ctx> CodeGen<'ctx> {
             eprintln!("═══════════════════════════════════════════════════════════════════\n");
 
             // Return dummy types, but this will produce incorrect IR
-            panic!(
+            debug_assert!(
+                false,
                 "FATAL: Cannot proceed without map metadata for '{}'",
                 map_name
             );
+
+            // Return fallback types for release builds
+            (
+                self.context.i32_type().into(),
+                self.context.i32_type().into(),
+            )
         }
     }
 

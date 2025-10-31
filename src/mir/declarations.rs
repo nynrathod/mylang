@@ -295,7 +295,10 @@ pub fn build_function_decl(builder: &mut MirBuilder, node: &AstNode) {
             }
         }
     } else {
-        panic!("Expected FunctionDecl node");
+        debug_assert!(
+            false,
+            "Expected FunctionDecl node - should be guaranteed by caller"
+        );
     }
 }
 

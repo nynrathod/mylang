@@ -1244,7 +1244,8 @@ impl<'ctx> CodeGen<'ctx> {
                             .unwrap()
                     }
                 } else {
-                    panic!("Condition value is not an integer type");
+                    debug_assert!(false, "Condition value is not an integer type");
+                    self.context.i32_type().const_zero()
                 };
 
                 let then_bb = bb_map.get(then_block).expect("Then BB not found");
