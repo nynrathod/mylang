@@ -3,7 +3,7 @@ use crate::parser::ast::AstNode;
 use std::fmt;
 
 /// Maximum recursion depth for parsing to prevent stack overflow
-pub const MAX_DEPTH: usize = 128;
+pub const MAX_DEPTH: usize = 64;
 
 /// Error type for parser.
 /// Used to signal parsing failures, such as unexpected tokens or premature end of input.

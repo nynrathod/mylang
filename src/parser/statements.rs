@@ -190,7 +190,17 @@ impl<'a> Parser<'a> {
     ///   - Wildcard: `_`
     /// Returns a Pattern enum variant.
     pub fn parse_pattern(&mut self) -> ParseResult<Pattern> {
-        if let Some(tok) = self.peek() {
+        // Prevent stack overflow from deeply nested patterns
+        if self.depth >= crate::parser::parser::MAX_DEPTH {
+            return Err(ParseError::UnexpectedTokenAt {
+                msg: "Pattern nesting too deep (recursion limit exceeded)".to_string(),
+                line: self.peek().map(|t| t.line).unwrap_or(0),
+                col: self.peek().map(|t| t.col).unwrap_or(0),
+            });
+        }
+
+        self.depth += 1;
+        let result = if let Some(tok) = self.peek() {
             match tok.kind {
                 // Identifier or enum variant pattern
                 TokenType::Identifier => {
@@ -223,7 +233,9 @@ impl<'a> Parser<'a> {
             }
         } else {
             Err(ParseError::EndOfInput)
-        }
+        };
+        self.depth -= 1;
+        result
     }
 
     /// Parses a block of statements enclosed in braces `{ ... }`.

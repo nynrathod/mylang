@@ -65,8 +65,8 @@ impl SemanticAnalyzer {
             scope_stack: Vec::new(),
             function_depth: 0,
             scope_sizes_stack: Vec::new(),
-            collected_errors: Vec::new(), // Initialize error collection
-            is_main_module: true,         // Main file by default
+            collected_errors: Vec::new(),
+            is_main_module: true,
         }
     }
 

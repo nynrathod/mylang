@@ -239,7 +239,17 @@ impl<'a> Parser<'a> {
     /// Examples: `Int`, `[Int]`, `{Str: Int}`, `Bool`
     /// Note: User defined types are not supported yet.
     fn parse_type_annotation(&mut self) -> ParseResult<TypeNode> {
-        if self.peek_is(TokenType::OpenBracket) {
+        self.depth += 1;
+        if self.depth > super::parser::MAX_DEPTH {
+            self.depth -= 1;
+            return Err(ParseError::UnexpectedTokenAt {
+                msg: "Type annotation nesting too deep (recursion limit exceeded)".to_string(),
+                line: self.peek().map(|t| t.line).unwrap_or(0),
+                col: self.peek().map(|t| t.col).unwrap_or(0),
+            });
+        }
+
+        let result = if self.peek_is(TokenType::OpenBracket) {
             // Array type: [Type]
             self.advance(); // consume '['
             let inner = self.parse_type_annotation()?;
@@ -270,7 +280,10 @@ impl<'a> Parser<'a> {
             Err(ParseError::UnexpectedToken(
                 "Expected type annotation".into(),
             ))
-        }
+        };
+
+        self.depth -= 1;
+        result
     }
 
     /// Expects and parses an identifier token, returning its string value.
