@@ -6,7 +6,18 @@ impl<'a> Parser<'a> {
     /// Entry point for parsing any expression.
     /// Delegates to precedence-based parser.
     pub fn parse_expression(&mut self) -> ParseResult<AstNode> {
-        self.parse_expression_prec(0)
+        self.depth += 1;
+        if self.depth > super::parser::MAX_DEPTH {
+            self.depth -= 1;
+            return Err(ParseError::UnexpectedTokenAt {
+                msg: "Expression nesting too deep (recursion limit exceeded)".to_string(),
+                line: self.peek().map(|t| t.line).unwrap_or(0),
+                col: self.peek().map(|t| t.col).unwrap_or(0),
+            });
+        }
+        let result = self.parse_expression_prec(0);
+        self.depth -= 1;
+        result
     }
 
     /// Parses an expression with operator precedence.
@@ -84,6 +95,11 @@ impl<'a> Parser<'a> {
     /// Can be chained: arr[0][1][2]
     fn parse_postfix(&mut self, mut expr: AstNode) -> ParseResult<AstNode> {
         while self.peek_is(TokenType::OpenBracket) {
+            if self.depth >= super::parser::MAX_DEPTH {
+                return Err(ParseError::UnexpectedToken(
+                    "Expression too deeply nested".to_string(),
+                ));
+            }
             self.advance(); // consume '['
             let index = self.parse_expression()?;
             self.expect(TokenType::CloseBracket)?;
@@ -102,11 +118,25 @@ impl<'a> Parser<'a> {
             match tok.kind {
                 TokenType::Number => {
                     let tok = self.advance().unwrap();
-                    Ok(AstNode::NumberLiteral(tok.value.parse::<i32>().unwrap()))
+                    match tok.value.parse::<i32>() {
+                        Ok(num) => Ok(AstNode::NumberLiteral(num)),
+                        Err(e) => Err(ParseError::UnexpectedTokenAt {
+                            msg: format!("Invalid integer literal: {}", e),
+                            line: tok.line,
+                            col: tok.col,
+                        }),
+                    }
                 }
                 TokenType::Float => {
                     let tok = self.advance().unwrap();
-                    Ok(AstNode::FloatLiteral(tok.value.parse::<f64>().unwrap()))
+                    match tok.value.parse::<f64>() {
+                        Ok(num) => Ok(AstNode::FloatLiteral(num)),
+                        Err(e) => Err(ParseError::UnexpectedTokenAt {
+                            msg: format!("Invalid float literal: {}", e),
+                            line: tok.line,
+                            col: tok.col,
+                        }),
+                    }
                 }
                 TokenType::Identifier => {
                     let tok = self.advance().unwrap();

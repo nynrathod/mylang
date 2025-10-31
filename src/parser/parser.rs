@@ -2,6 +2,9 @@ use crate::lexar::token::{Token, TokenType};
 use crate::parser::ast::AstNode;
 use std::fmt;
 
+/// Maximum recursion depth for parsing to prevent stack overflow
+pub const MAX_DEPTH: usize = 128;
+
 /// Error type for parser.
 /// Used to signal parsing failures, such as unexpected tokens or premature end of input.
 #[allow(dead_code)]
@@ -38,12 +41,17 @@ impl fmt::Display for ParseError {
 pub struct Parser<'a> {
     pub tokens: &'a [Token<'a>], // Reference to a slice of tokens from lexar.
     pub current: usize,          // Current index; tracks progress through tokens.
+    pub depth: usize,            // Current recursion depth to prevent stack overflow.
 }
 
 impl<'a> Parser<'a> {
     /// Create a new parser for a given token stream.
     pub fn new(tokens: &'a [Token<'a>]) -> Self {
-        Parser { tokens, current: 0 }
+        Parser {
+            tokens,
+            current: 0,
+            depth: 0,
+        }
     }
 
     /// Peek at the current token without advancing.
